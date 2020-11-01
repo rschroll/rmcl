@@ -33,7 +33,7 @@ and use the code you see on the webpage
     rmapy.register_device("fkgzzklrs")
     # It's always a good idea to refresh the user token every time you start
     # a new session.
-    rmapy.refresh_token()
+    rmapy.renew_token()
     # Should return True
     rmapy.is_auth()
 
@@ -221,4 +221,3 @@ And verify its existance:
 
     >>> [ i.VissibleName for i in collection.children(books) if i.Type == "DocumentType" ]
     ['Origin - Dan Brown', 'Flatland', 'Game Of Thrones', '27-11-2019']
-
