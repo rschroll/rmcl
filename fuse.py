@@ -101,11 +101,8 @@ def main():
     pyfuse3.init(fs, '/tmp/rm', options)  # TODO: Allow set mountpoint
     try:
         trio.run(pyfuse3.main)
-    except:
-        pyfuse3.close(unmount=False)
-        raise
-
-    pyfuse3.close()
+    finally:
+        pyfuse3.close()
 
 if __name__ == '__main__':
     main()
