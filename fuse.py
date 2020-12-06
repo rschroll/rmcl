@@ -1,3 +1,5 @@
+import argparse
+import enum
 import errno
 import os
 import stat
@@ -9,13 +11,22 @@ import trio
 from rmapy import client
 from rmapy.items import Document, Folder
 
+class FSMode(enum.Enum):
+    meta = 'meta'
+    raw = 'raw'
+    pdf = 'pdf'
+
+    def __str__(self):
+        return self.name
+
 class RmApiFS(pyfuse3.Operations):
 
-    def __init__(self):
+    def __init__(self, mode):
         super().__init__()
         self._next_inode = pyfuse3.ROOT_INODE
         self.inode_map = bidict.bidict()
         self.inode_map[self.next_inode()] = ''
+        self.mode = mode
 
     def next_inode(self):
         value = self._next_inode
@@ -90,19 +101,34 @@ class RmApiFS(pyfuse3.Operations):
 
     async def read(self, fh, start, size):
         item = client.get_by_id(self.get_id(fh))
-        contents = f'{item._metadata!r}\n'.encode('utf-8')
+        if self.mode == FSMode.meta:
+            contents = f'{item._metadata!r}\n'.encode('utf-8')
+        elif self.mode == FSMode.raw:
+            contents = b'Raw file contents\n'
+        elif self.mode == FSMode.pdf:
+            contents = b'PDF file contents\n'
         return contents[start:start+size]
 
-def main():
-    fs = RmApiFS()
-    options = set(pyfuse3.default_options)
-    options.add('fsname=rmapi')
-    options.add('debug')  # TODO: Allow setting this
-    pyfuse3.init(fs, '/tmp/rm', options)  # TODO: Allow set mountpoint
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('mountpoint', type=str, help="Mount point of filesystem")
+    parser.add_argument('-d', '--debug', action='store_true', default=False,
+                        help="Enable debugging output")
+    parser.add_argument('-m', '--mode', type=FSMode, choices=list(FSMode),
+                        default=FSMode.raw, help="Type of files to mount")
+    return parser.parse_args()
+
+def main(options):
+    fs = RmApiFS(options.mode)
+    fuse_options = set(pyfuse3.default_options)
+    fuse_options.add('fsname=rmapi')
+    if options.debug:
+        fuse_options.add('debug')
+    pyfuse3.init(fs, options.mountpoint, fuse_options)
     try:
         trio.run(pyfuse3.main)
     finally:
         pyfuse3.close()
 
 if __name__ == '__main__':
-    main()
+    main(parse_args())
