@@ -7,6 +7,7 @@ from .collections import Collection
 from .config import load, dump
 from .document import Document, ZipDocument, from_request_stream
 from .folder import Folder
+from .items import Item, VirtualFolder
 from .exceptions import (
     AuthError,
     DocumentNotFound,
@@ -41,6 +42,7 @@ class Client(object):
             self.token_set["devicetoken"] = config["devicetoken"]
         if "usertoken" in config:
             self.token_set["usertoken"] = config["usertoken"]
+        self.by_id = {}
 
     def request(self, method: str, path: str,
                 data=None,
@@ -162,6 +164,28 @@ class Client(object):
             return True
         else:
             return False
+
+    ##########
+
+    def get_items(self):
+        response = self.request('GET', '/document-storage/json/2/docs')
+        items = [Item.from_metadata(i) for i in response.json()]
+        self.by_id = {i.id: i for i in items}
+
+        self.by_id[''] = VirtualFolder('')
+        self.by_id['trash'] = VirtualFolder('Trash')
+
+        for i in items:
+            self.by_id[i.parent].children.append(i)
+
+    def get_by_id(self, id_):
+        # TODO: Check age and refresh items if necessary.
+        if not self.by_id:
+            self.get_items()
+
+        return self.by_id[id_]
+
+    ##########
 
     def get_meta_items(self) -> Collection:
         """Returns a new collection from meta items.
@@ -416,3 +440,16 @@ class Client(object):
             raise ApiError(
                 f"Got An invalid HTTP Response: {response.status_code}",
                 response=response)
+
+
+_client = None
+
+def __getattr__(name):
+    global _client
+    if name == 'client':
+        print("Gettting client!")
+        if _client is None:
+            _client = Client()
+            _client.renew_token()
+        return _client
+    raise AttributeError(f'module {__name__} has no attribute {name}')
