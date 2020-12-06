@@ -1,9 +1,19 @@
+import datetime
 import logging
+import re
 
 class Item:
 
     DOCUMENT = 'DocumentType'
     FOLDER = 'CollectionType'
+
+    @staticmethod
+    def parse_datetime(dt):
+        # fromisoformat needs 0, 3, or 6 decimal places for the second, but
+        # we can get other numbers from the API.  Since we're not doing anything
+        # that time-sensitive, we'll just chop off the fractional seconds.
+        dt = re.sub(r'\.\d*', '', dt).replace('Z', '+00:00')
+        return datetime.datetime.fromisoformat(dt)
 
     @classmethod
     def from_metadata(cls, metadata):
@@ -29,6 +39,10 @@ class Item:
     @property
     def parent(self):
         return self._metadata.get('Parent')
+
+    @property
+    def mtime(self):
+        return self.parse_datetime(self._metadata.get('ModifiedClient'))
 
     @property
     def virtual(self):
@@ -68,6 +82,10 @@ class VirtualFolder(Folder):
     @property
     def parent(self):
         return None
+
+    @property
+    def mtime(self):
+        return datetime.datetime.now(datetime.timezone.utc)
 
     @property
     def virtual(self):

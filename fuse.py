@@ -58,7 +58,7 @@ class RmApiFS(pyfuse3.Operations):
             entry.st_mode = (stat.S_IFDIR | 0o555)
             entry.st_size = 0
 
-        stamp = int(1438467123.985654 * 1e9)  # TODO: From "ModifiedClient"?
+        stamp = int(item.mtime.timestamp() * 1e9)
         entry.st_atime_ns = stamp
         entry.st_ctime_ns = stamp
         entry.st_mtime_ns = stamp
