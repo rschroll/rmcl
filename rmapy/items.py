@@ -2,6 +2,12 @@ import datetime
 import logging
 import re
 
+from . import api
+from .exceptions import DocumentNotFound
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
 class Item:
 
     DOCUMENT = 'DocumentType'
@@ -27,6 +33,7 @@ class Item:
 
     def __init__(self, metadata):
         self._metadata = metadata
+        self._raw = b''
 
     @property
     def name(self):
@@ -50,6 +57,35 @@ class Item:
 
     def __repr__(self):
         return f'<{self.__class__.__name__} "{self.name}">'
+
+    def refresh_metadata(self, downloadable=True):
+        try:
+            self._metadata = api.client.get_metadata(self.id, downloadable)
+        except DocumentNotFound:
+            logging.error(f"Could not update metadata for {self}")
+
+    @property
+    def download_url(self):
+        url = self._metadata['BlobURLGet']
+        if url and self.parse_datetime(self._metadata['BlobURLGetExpires']) > now():
+            return url
+        return None
+
+    @property
+    def raw(self):
+        if not self._raw:
+            if not self.download_url:
+                self.refresh_metadata(downloadable=True)
+            # This could have failed...
+            if self.download_url:
+                self._raw = api.client.get_blob(self.download_url)
+        return self._raw
+
+    @property
+    def raw_size(self):
+        if self._raw:
+            return len(self._raw)
+        return 0
 
 
 class Document(Item):
@@ -85,7 +121,7 @@ class VirtualFolder(Folder):
 
     @property
     def mtime(self):
-        return datetime.datetime.now(datetime.timezone.utc)
+        return now()
 
     @property
     def virtual(self):

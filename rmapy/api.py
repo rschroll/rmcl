@@ -185,6 +185,18 @@ class Client(object):
 
         return self.by_id[id_]
 
+    def get_metadata(self, id_, downloadable=True):
+        response = self.request('GET', '/document-storage/json/2/docs',
+                                params={'doc': id_, 'withBlob': downloadable})
+        for meta in response.json():
+            if meta['ID'] == id_:
+                return meta
+        raise DocumentNotFound(f"Could not find document {id_}")
+
+    def get_blob(self, url):
+        response = self.request('GET', url)
+        return response.content
+
     ##########
 
     def get_meta_items(self) -> Collection:
@@ -447,8 +459,8 @@ _client = None
 def __getattr__(name):
     global _client
     if name == 'client':
-        print("Gettting client!")
         if _client is None:
+            print("Gettting client!")
             _client = Client()
             _client.renew_token()
         return _client

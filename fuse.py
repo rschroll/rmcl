@@ -41,6 +41,17 @@ class RmApiFS(pyfuse3.Operations):
             self.inode_map[self.next_inode()] = id_
         return self.inode_map.inverse[id_]
 
+    def filename(self, item):
+        base = item.name.encode('utf-8')
+        if isinstance(item, Folder):
+            return base
+
+        if self.mode == FSMode.raw:
+            return base + b'.zip'
+        if self.mode == FSMode.pdf:
+            return base + b'.pdf'
+        return base
+
     async def lookup(self, inode_p, name, ctx=None):
         folder = client.get_by_id(self.get_id(inode_p))
         if name == '.':
@@ -64,7 +75,10 @@ class RmApiFS(pyfuse3.Operations):
         entry = pyfuse3.EntryAttributes()
         if isinstance(item, Document):
             entry.st_mode = (stat.S_IFREG | 0o444)  # TODO: Permissions?
-            entry.st_size = 0  # Is this okay?
+            if self.mode == FSMode.raw:
+                entry.st_size = item.raw_size
+            else:
+                entry.st_size = 0
         elif isinstance(item, Folder):
             entry.st_mode = (stat.S_IFDIR | 0o555)
             entry.st_size = 0
@@ -88,9 +102,10 @@ class RmApiFS(pyfuse3.Operations):
     async def readdir(self, inode, start_id, token):
         item = client.get_by_id(self.get_id(inode))
         for i, c in enumerate(item.children[start_id:]):
-            pyfuse3.readdir_reply(token, c.name.encode('utf-8'),
+            pyfuse3.readdir_reply(token, self.filename(c),
                                   await self.getattr(self.get_inode(c.id)),
                                   start_id + i + 1)
+        # TODO: include . and ..
 
     async def open(self, inode, flags, ctx):
         if inode not in self.inode_map:
@@ -104,7 +119,7 @@ class RmApiFS(pyfuse3.Operations):
         if self.mode == FSMode.meta:
             contents = f'{item._metadata!r}\n'.encode('utf-8')
         elif self.mode == FSMode.raw:
-            contents = b'Raw file contents\n'
+            contents = item.raw
         elif self.mode == FSMode.pdf:
             contents = b'PDF file contents\n'
         return contents[start:start+size]
