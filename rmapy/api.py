@@ -197,6 +197,10 @@ class Client(object):
         response = self.request('GET', url)
         return response.content
 
+    def get_blob_size(self, url):
+        response = self.request('HEAD', url)
+        return int(response.headers.get('Content-Length', 0))
+
     ##########
 
     def get_meta_items(self) -> Collection:

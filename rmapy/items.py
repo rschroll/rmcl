@@ -34,6 +34,7 @@ class Item:
     def __init__(self, metadata):
         self._metadata = metadata
         self._raw = b''
+        self._raw_size = 0
 
     @property
     def name(self):
@@ -83,9 +84,12 @@ class Item:
 
     @property
     def raw_size(self):
-        if self._raw:
-            return len(self._raw)
-        return 0
+        if not self._raw_size:
+            if not self.download_url:
+                self.refresh_metadata(downloadable=True)
+            if self.download_url:
+                self._raw_size = api.client.get_blob_size(self.download_url)
+        return self._raw_size
 
 
 class Document(Item):
