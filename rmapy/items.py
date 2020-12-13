@@ -1,6 +1,8 @@
 import datetime
+import io
 import logging
 import re
+import zipfile
 
 from . import api
 from .exceptions import DocumentNotFound
@@ -35,6 +37,8 @@ class Item:
         self._metadata = metadata
         self._raw = b''
         self._raw_size = 0
+        self._type = None
+        self._size = 0
 
     @property
     def name(self):
@@ -67,6 +71,10 @@ class Item:
 
     @property
     def download_url(self):
+        if not (self._metadata['BlobURLGet'] and
+                self.parse_datetime(self._metadata['BlobURLGetExpires']) > now()):
+            self.refresh_metadata(downloadable=True)
+        # This could have failed...
         url = self._metadata['BlobURLGet']
         if url and self.parse_datetime(self._metadata['BlobURLGetExpires']) > now():
             return url
@@ -74,28 +82,55 @@ class Item:
 
     @property
     def raw(self):
-        if not self._raw:
-            if not self.download_url:
-                self.refresh_metadata(downloadable=True)
-            # This could have failed...
-            if self.download_url:
-                self._raw = api.client.get_blob(self.download_url)
+        if not self._raw and self.download_url:
+            self._raw = api.client.get_blob(self.download_url)
         return self._raw
 
     @property
     def raw_size(self):
-        if not self._raw_size:
-            if not self.download_url:
-                self.refresh_metadata(downloadable=True)
-            if self.download_url:
-                self._raw_size = api.client.get_blob_size(self.download_url)
+        if not self._raw_size and self.download_url:
+            self._raw_size = api.client.get_blob_size(self.download_url)
         return self._raw_size
+
+    def _get_details(self):
+        if not self._type and self.download_url:
+            print('Getting details', self)
+            self._type, self._size = api.client.get_file_details(self.download_url)
+            if self._size is None:
+                self._size = self.raw_size
+            print('  Got', self._type, self._size)
+
+    @property
+    def type(self):
+        self._get_details()
+        return self._type
+
+    @property
+    def size(self):
+        self._get_details()
+        return self._size
 
 
 class Document(Item):
 
-    def get_contents(self):
-        ...
+    def __init__(self, metadata):
+        super().__init__(metadata)
+        self._contents = None
+
+    @property
+    def contents(self):
+        if self.type in (api.FileType.notes, api.FileType.unknown):
+            return self.raw
+
+        if self._contents is None:
+            zf = zipfile.ZipFile(io.BytesIO(self.raw), 'r')
+            for f in zf.filelist:
+                if f.filename.endswith(str(self.type)):
+                    self._contents = zf.read(f)
+                    break
+            else:
+                self._contents = b'Unable to load file contents'
+        return self._contents
 
 
 class Folder(Item):

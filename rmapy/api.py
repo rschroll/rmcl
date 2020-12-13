@@ -1,13 +1,17 @@
 import requests
 from logging import getLogger
 from datetime import datetime
+import enum
+import io
 from typing import Union, Optional
 from uuid import uuid4
+
 from .collections import Collection
 from .config import load, dump
 from .document import Document, ZipDocument, from_request_stream
 from .folder import Folder
 from .items import Item, VirtualFolder
+from .zipdir import ZipHeader
 from .exceptions import (
     AuthError,
     DocumentNotFound,
@@ -18,10 +22,21 @@ from .const import (RFC3339Nano,
                     BASE_URL,
                     DEVICE_TOKEN_URL,
                     USER_TOKEN_URL,
-                    DEVICE,)
+                    DEVICE,
+                    NBYTES,)
 
 log = getLogger("rmapy")
 DocumentOrFolder = Union[Document, Folder]
+
+
+class FileType(enum.Enum):
+    pdf = 'pdf'
+    epub = 'epub'
+    notes = 'notes'
+    unknown = 'unknown'
+
+    def __str__(self):
+        return self.name
 
 
 class Client(object):
@@ -200,6 +215,23 @@ class Client(object):
     def get_blob_size(self, url):
         response = self.request('HEAD', url)
         return int(response.headers.get('Content-Length', 0))
+
+    def get_file_details(self, url):
+        response = self.request('GET', url, headers={'Range': f'bytes=-{NBYTES}'})
+        # Want to start a known file extension - file name length - fixed header length
+        key_index = response.content.rfind(b'.content') - 36 - 46
+        if key_index < 0:
+            return FileType.unknown, None
+
+        stream = io.BytesIO(response.content[key_index:])
+        item = ZipHeader.from_stream(stream)
+        while item is not None:
+            if item.filename.endswith(b'.pdf'):
+                return FileType.pdf, item.uncompressed_size
+            if item.filename.endswith(b'.epub'):
+                return FileType.epub, item.uncompressed_size
+            item = ZipHeader.from_stream(stream)
+        return FileType.notes, None
 
     ##########
 

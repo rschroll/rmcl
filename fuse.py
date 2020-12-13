@@ -14,7 +14,7 @@ from rmapy.items import Document, Folder
 class FSMode(enum.Enum):
     meta = 'meta'
     raw = 'raw'
-    pdf = 'pdf'
+    orig = 'orig'
 
     def __str__(self):
         return self.name
@@ -48,8 +48,8 @@ class RmApiFS(pyfuse3.Operations):
 
         if self.mode == FSMode.raw:
             return base + b'.zip'
-        if self.mode == FSMode.pdf:
-            return base + b'.pdf'
+        if self.mode == FSMode.orig:
+            return base + b'.' + str(item.type).encode('utf-8')
         return base
 
     async def lookup(self, inode_p, name, ctx=None):
@@ -77,6 +77,8 @@ class RmApiFS(pyfuse3.Operations):
             entry.st_mode = (stat.S_IFREG | 0o444)  # TODO: Permissions?
             if self.mode == FSMode.raw:
                 entry.st_size = item.raw_size
+            elif self.mode == FSMode.orig:
+                entry.st_size = item.size
             else:
                 entry.st_size = 0
         elif isinstance(item, Folder):
@@ -120,8 +122,8 @@ class RmApiFS(pyfuse3.Operations):
             contents = f'{item._metadata!r}\n'.encode('utf-8')
         elif self.mode == FSMode.raw:
             contents = item.raw
-        elif self.mode == FSMode.pdf:
-            contents = b'PDF file contents\n'
+        elif self.mode == FSMode.orig:
+            contents = item.contents
         return contents[start:start+size]
 
 def parse_args():
