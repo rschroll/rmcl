@@ -155,8 +155,10 @@ class Folder(Item):
 
 class VirtualFolder(Folder):
 
-    def __init__(self, name):
+    def __init__(self, name, id_, parent_id=None):
         self._name = name
+        self._id = id_
+        self._parent = parent_id
         self.children = []
 
     @property
@@ -165,11 +167,11 @@ class VirtualFolder(Folder):
 
     @property
     def id(self):
-        return self._name.lower()
+        return self._id
 
     @property
     def parent(self):
-        return None
+        return self._parent
 
     @property
     def mtime(self):

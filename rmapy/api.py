@@ -187,8 +187,11 @@ class Client(object):
         items = [Item.from_metadata(i) for i in response.json()]
         self.by_id = {i.id: i for i in items}
 
-        self.by_id[''] = VirtualFolder('')
-        self.by_id['trash'] = VirtualFolder('Trash')
+        root = VirtualFolder('', '')
+        trash = VirtualFolder('.trash', 'trash', root.id)
+        root.children.append(trash)
+        self.by_id[root.id] = root
+        self.by_id[trash.id] = trash
 
         for i in items:
             self.by_id[i.parent].children.append(i)
