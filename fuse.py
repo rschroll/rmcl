@@ -9,7 +9,8 @@ import pyfuse3
 import trio
 
 from rmapy import client
-from rmapy.items import Document, Folder, now
+from rmapy.items import Document, Folder
+from rmapy.utils import now
 
 class FSMode(enum.Enum):
     meta = 'meta'
@@ -189,6 +190,10 @@ class RmApiFS(pyfuse3.Operations):
             raise pyfuse3.FUSEError(errno.EPERM)
 
         command = buf.decode('utf-8').strip().lower()
+        if command == 'refresh':
+            client.refresh_deadline = None
+            return len(buf)
+
         try:
             self.mode = FSMode[command]
         except KeyError:

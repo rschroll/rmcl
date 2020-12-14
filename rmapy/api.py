@@ -9,8 +9,9 @@ from uuid import uuid4
 from .collections import Collection
 from .config import load, dump
 from .document import Document, ZipDocument, from_request_stream
-from .folder import Folder
-from .items import Item, VirtualFolder
+from .folder import Folder as OldFolder
+from .items import Item, Folder, VirtualFolder
+from .utils import now
 from .zipdir import ZipHeader
 from .exceptions import (
     AuthError,
@@ -23,10 +24,11 @@ from .const import (RFC3339Nano,
                     DEVICE_TOKEN_URL,
                     USER_TOKEN_URL,
                     DEVICE,
-                    NBYTES,)
+                    NBYTES,
+                    FILE_LIST_VALIDITY)
 
 log = getLogger("rmapy")
-DocumentOrFolder = Union[Document, Folder]
+DocumentOrFolder = Union[Document, OldFolder]
 
 
 class FileType(enum.Enum):
@@ -57,7 +59,11 @@ class Client(object):
             self.token_set["devicetoken"] = config["devicetoken"]
         if "usertoken" in config:
             self.token_set["usertoken"] = config["usertoken"]
-        self.by_id = {}
+
+        root = VirtualFolder('', '')
+        trash = VirtualFolder('.trash', 'trash', root.id)
+        self.by_id = {root.id: root, trash.id: trash}
+        self.refresh_deadline = None
 
     def request(self, method: str, path: str,
                 data=None,
@@ -182,24 +188,33 @@ class Client(object):
 
     ##########
 
-    def get_items(self):
+    def update_items(self):
         response = self.request('GET', '/document-storage/json/2/docs')
-        items = [Item.from_metadata(i) for i in response.json()]
-        self.by_id = {i.id: i for i in items}
+        old_ids = set(self.by_id) - {'', 'trash'}
+        self.by_id[''].children = []
+        self.by_id['trash'].children = []
+        for item in response.json():
+            old = self.by_id.get(item['ID'])
+            if old:
+                old_ids.remove(old.id)
+            if not old or old.version != item['Version']:
+                new = Item.from_metadata(item)
+                self.by_id[new.id] = new
+            elif isinstance(old, Folder):
+                old.children = []
 
-        root = VirtualFolder('', '')
-        trash = VirtualFolder('.trash', 'trash', root.id)
-        root.children.append(trash)
-        self.by_id[root.id] = root
-        self.by_id[trash.id] = trash
+        for id_ in old_ids:
+            del self.by_id[id_]
 
-        for i in items:
-            self.by_id[i.parent].children.append(i)
+        for i in self.by_id.values():
+            if i.parent is not None:
+                self.by_id[i.parent].children.append(i)
+
+        self.refresh_deadline = now() + FILE_LIST_VALIDITY
 
     def get_by_id(self, id_):
-        # TODO: Check age and refresh items if necessary.
-        if not self.by_id:
-            self.get_items()
+        if not self.refresh_deadline or now() > self.refresh_deadline:
+            self.update_items()
 
         return self.by_id[id_]
 
@@ -283,7 +298,7 @@ class Client(object):
 
         if len(data_response) > 0:
             if data_response[0]["Type"] == "CollectionType":
-                return Folder(**data_response[0])
+                return OldFolder(**data_response[0])
             elif data_response[0]["Type"] == "DocumentType":
                 return Document(**data_response[0])
         else:
@@ -334,7 +349,7 @@ class Client(object):
 
         return self.check_response(response)
 
-    def upload(self, zip_doc: ZipDocument, to: Folder = Folder(ID="")):
+    def upload(self, zip_doc: ZipDocument, to: OldFolder = OldFolder(ID="")):
         """Upload a document to the cloud.
 
         Add a new document to the Remarkable Cloud.
@@ -421,7 +436,7 @@ class Client(object):
                     "Cannot create a folder. because BlobURLPut is not set",
                     response=res)
 
-    def create_folder(self, folder: Folder):
+    def create_folder(self, folder: OldFolder):
         """Create a new folder meta object.
 
         This needs to be done in 3 steps:

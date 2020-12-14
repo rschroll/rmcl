@@ -7,9 +7,7 @@ import zipfile
 from . import api
 from . import datacache
 from .exceptions import DocumentNotFound
-
-def now():
-    return datetime.datetime.now(datetime.timezone.utc)
+from .utils import now
 
 class Item:
 
