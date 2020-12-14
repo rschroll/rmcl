@@ -5,6 +5,7 @@ import re
 import zipfile
 
 from . import api
+from . import datacache
 from .exceptions import DocumentNotFound
 
 def now():
@@ -36,9 +37,12 @@ class Item:
     def __init__(self, metadata):
         self._metadata = metadata
         self._raw = b''
-        self._raw_size = 0
-        self._type = None
-        self._size = 0
+        self._raw_size = datacache.get_property(self.id, self.version, 'raw_size') or 0
+        self._size = datacache.get_property(self.id, self.version, 'size') or 0
+        try:
+            self._type = api.FileType[datacache.get_property(self.id, self.version, 'type')]
+        except KeyError:
+            self._type = None
 
     @property
     def name(self):
@@ -47,6 +51,10 @@ class Item:
     @property
     def id(self):
         return self._metadata.get('ID')
+
+    @property
+    def version(self):
+        return self._metadata.get('Version')
 
     @property
     def parent(self):
@@ -90,6 +98,7 @@ class Item:
     def raw_size(self):
         if not self._raw_size and self.download_url:
             self._raw_size = api.client.get_blob_size(self.download_url)
+            datacache.set_property(self.id, self.version, 'raw_size', self._raw_size)
         return self._raw_size
 
     def _get_details(self):
@@ -98,6 +107,10 @@ class Item:
             self._type, self._size = api.client.get_file_details(self.download_url)
             if self._size is None:
                 self._size = self.raw_size
+            datacache.set_property(self.id, self.version, 'size', self._size)
+            if self._type != api.FileType.unknown:
+                # Try again the next time we start up.
+                datacache.set_property(self.id, self.version, 'type', str(self._type))
             print('  Got', self._type, self._size)
 
     @property
