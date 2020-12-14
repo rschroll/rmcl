@@ -41,7 +41,12 @@ class RmApiFS(pyfuse3.Operations):
             self.inode_map[self.next_inode()] = id_
         return self.inode_map.inverse[id_]
 
-    def filename(self, item):
+    def filename(self, item, pitem):
+        if item == pitem:
+            return b'.'
+        if pitem.parent == item.id:
+            return b'..'
+
         base = item.name.encode('utf-8')
         if isinstance(item, Folder):
             return base
@@ -103,11 +108,14 @@ class RmApiFS(pyfuse3.Operations):
 
     async def readdir(self, inode, start_id, token):
         item = client.get_by_id(self.get_id(inode))
-        for i, c in enumerate(item.children[start_id:]):
-            pyfuse3.readdir_reply(token, self.filename(c),
+        direntries = [item]
+        if item.parent is not None:
+            direntries.append(client.get_by_id(item.parent))
+        direntries.extend(item.children)
+        for i, c in enumerate(direntries[start_id:]):
+            pyfuse3.readdir_reply(token, self.filename(c, item),
                                   await self.getattr(self.get_inode(c.id)),
                                   start_id + i + 1)
-        # TODO: include . and ..
 
     async def open(self, inode, flags, ctx):
         if inode not in self.inode_map:
