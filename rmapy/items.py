@@ -6,6 +6,7 @@ import zipfile
 
 from . import api
 from . import datacache
+from . import documentcache
 from .exceptions import DocumentNotFound
 from .utils import now
 
@@ -34,7 +35,6 @@ class Item:
 
     def __init__(self, metadata):
         self._metadata = metadata
-        self._raw = b''
         self._raw_size = datacache.get_property(self.id, self.version, 'raw_size') or 0
         self._size = datacache.get_property(self.id, self.version, 'size') or 0
         try:
@@ -88,9 +88,11 @@ class Item:
 
     @property
     def raw(self):
-        if not self._raw and self.download_url:
-            self._raw = api.client.get_blob(self.download_url)
-        return self._raw
+        contents = documentcache.get_document(self.id, self.version, 'raw')
+        if not contents and self.download_url:
+            contents = api.client.get_blob(self.download_url)
+            documentcache.set_document(self.id, self.version, 'raw', contents)
+        return contents
 
     @property
     def raw_size(self):
@@ -124,24 +126,23 @@ class Item:
 
 class Document(Item):
 
-    def __init__(self, metadata):
-        super().__init__(metadata)
-        self._contents = None
-
     @property
     def contents(self):
         if self.type in (api.FileType.notes, api.FileType.unknown):
             return self.raw
 
-        if self._contents is None:
+        contents = documentcache.get_document(self.id, self.version, 'orig')
+        if contents is None:
             zf = zipfile.ZipFile(io.BytesIO(self.raw), 'r')
             for f in zf.filelist:
                 if f.filename.endswith(str(self.type)):
-                    self._contents = zf.read(f)
+                    contents = zf.read(f)
                     break
             else:
-                self._contents = b'Unable to load file contents'
-        return self._contents
+                contents = b'Unable to load file contents'
+            print(len(contents))
+            documentcache.set_document(self.id, self.version, 'orig', contents)
+        return contents
 
 
 class Folder(Item):
