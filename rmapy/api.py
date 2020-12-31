@@ -1,6 +1,5 @@
 import asks
 from logging import getLogger
-from datetime import datetime
 import enum
 import io
 import trio
@@ -380,7 +379,7 @@ class Client(object):
             raise ApiError("an error occured while uploading the document.",
                            response=response)
 
-    def update_metadata(self, docorfolder: DocumentOrFolder):
+    async def update_metadata(self, metadata):
         """Send an update of the current metadata of a meta object
 
         Update the meta item.
@@ -390,12 +389,12 @@ class Client(object):
                 from.
         """
 
-        req = docorfolder.to_dict()
-        req["Version"] = self.get_current_version(docorfolder) + 1
-        req["ModifiedClient"] = datetime.utcnow().strftime(RFC3339Nano)
-        res = self.request("PUT",
+        metadata['Version'] += 1
+        metadata["ModifiedClient"] = now().strftime(RFC3339Nano)
+        res = await self.request("PUT",
                            "/document-storage/json/2/upload/update-status",
-                           body=[req])
+                           body=[metadata])
+        self.refresh_deadline = None
 
         return self.check_response(res)
 
@@ -491,7 +490,7 @@ class Client(object):
             ApiError: When the response contains an error
         """
 
-        if response.ok:
+        if response.status_code < 400:
             if len(response.json()) > 0:
                 if response.json()[0]["Success"]:
                     return True

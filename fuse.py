@@ -9,6 +9,7 @@ import pyfuse3
 import trio
 
 from rmapy.api import get_client
+from rmapy.exceptions import ApiError
 from rmapy.items import Document, Folder
 from rmapy.utils import now
 
@@ -81,10 +82,10 @@ class RmApiFS(pyfuse3.Operations):
             return self.mode_file
         return await (await get_client()).get_by_id(id_)
 
-    async def filename(self, item, pitem):
+    async def filename(self, item, pitem=None):
         if item == pitem:
             return b'.'
-        if pitem.parent == item.id:
+        if pitem and pitem.parent == item.id:
             return b'..'
 
         base = item.name.encode('utf-8')
@@ -109,7 +110,7 @@ class RmApiFS(pyfuse3.Operations):
             inode = self.get_inode(self.mode_file.id)
         else:
             for f in folder.children:
-                if f.name == name:
+                if await self.filename(f) == name:
                     inode = self.get_inode(f)
                     break
             else:
@@ -129,7 +130,7 @@ class RmApiFS(pyfuse3.Operations):
             else:
                 entry.st_size = 0
         elif isinstance(item, Folder):
-            entry.st_mode = (stat.S_IFDIR | 0o555)
+            entry.st_mode = (stat.S_IFDIR | 0o755)
             entry.st_size = 0
         elif isinstance(item, ModeFile):
             entry.st_mode = (stat.S_IFREG | 0o644)
@@ -195,6 +196,26 @@ class RmApiFS(pyfuse3.Operations):
         except KeyError:
             raise pyfuse3.FUSEError(errno.EINVAL)  # Invalid argument
         return len(buf)
+
+    async def rename(self, p_inode_old, name_old, p_inode_new, name_new, flags, ctx):
+        parent_old = await self.get_by_id(self.get_id(p_inode_old))
+        parent_new = await self.get_by_id(self.get_id(p_inode_new))
+        items = [i for i in parent_old.children if await self.filename(i) == name_old]
+        if not items:
+            raise pyfuse3.FUSEError(errno.ENOENT)
+        item = items[0]  # And we hope there's only this one.
+        # For now, we're going to disallow any move on top of an existing file
+        basename = name_new.rsplit(b'.', 1)[0]
+        conflicting = [i for i in parent_new.children if i.name.encode('utf-8') == basename]
+        if p_inode_old != p_inode_new and conflicting:
+            raise pyfuse3.FUSEError(errno.EEXIST)
+
+        item.parent = parent_new.id
+        item.name = basename.decode('utf-8')
+        try:
+            await item.update_metadata()
+        except ApiError:
+            raise pyfuse3.FUSEError(errno.EREMOTEIO)
 
 def parse_args():
     parser = argparse.ArgumentParser()

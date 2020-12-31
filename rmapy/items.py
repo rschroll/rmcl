@@ -60,6 +60,10 @@ class Item:
     def name(self):
         return self._metadata.get('VissibleName')
 
+    @name.setter
+    def name(self, value):
+        self._metadata['VissibleName'] = value
+
     @property
     def id(self):
         return self._metadata.get('ID')
@@ -71,6 +75,10 @@ class Item:
     @property
     def parent(self):
         return self._metadata.get('Parent')
+
+    @parent.setter
+    def parent(self, value):
+        self._metadata['Parent'] = value
 
     @property
     def mtime(self):
@@ -135,6 +143,10 @@ class Item:
     async def size(self):
         await self._get_details()
         return self._size
+
+    @with_lock
+    async def update_metadata(self):
+        await (await api.get_client()).update_metadata(self._metadata)
 
 
 class Document(Item):
