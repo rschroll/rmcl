@@ -9,6 +9,7 @@ import pyfuse3
 import trio
 
 from rmapy.api import get_client
+from rmapy.const import ROOT_ID
 from rmapy.exceptions import ApiError, VirtualItemError
 from rmapy.items import Document, Folder
 from rmapy.utils import now
@@ -117,25 +118,25 @@ class RmApiFS(pyfuse3.Operations):
 
     async def get_by_name(self, p_inode, name):
         folder = await self.get_by_id(self.get_id(p_inode))
+        if folder.id == ROOT_ID and name == self.mode_file.name.encode('utf-8'):
+            return self.mode_file
         for c in folder.children:
             if await self.filename(c) == name:
                 return c
         return None
 
     async def lookup(self, p_inode, name, ctx=None):
-        if name == '.':
+        if name == b'.':
             inode = p_inode
-        elif name == '..':
+        elif name == b'..':
             folder = await self.get_by_id(self.get_id(p_inode))
             if folder.parent is None:
                 raise pyfuse3.FUSEError(errno.ENOENT)
             inode = self.get_inode(folder.parent)
-        elif name == self.mode_file.name:
-            inode = self.get_inode(self.mode_file.id)
         else:
             item = await self.get_by_name(p_inode, name)
             if item:
-                inode = self.get_inode(item)
+                inode = self.get_inode(item.id)
             else:
                 raise pyfuse3.FUSEError(errno.ENOENT)
 
