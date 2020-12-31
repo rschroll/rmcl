@@ -98,21 +98,27 @@ class RmApiFS(pyfuse3.Operations):
             return base + b'.' + str(await item.type()).encode('utf-8')
         return base
 
-    async def lookup(self, inode_p, name, ctx=None):
-        folder = await self.get_by_id(self.get_id(inode_p))
+    async def get_by_name(self, p_inode, name):
+        folder = await self.get_by_id(self.get_id(p_inode))
+        for c in folder.children:
+            if await self.filename(c) == name:
+                return c
+        return None
+
+    async def lookup(self, p_inode, name, ctx=None):
         if name == '.':
-            inode = inode_p
+            inode = p_inode
         elif name == '..':
+            folder = await self.get_by_id(self.get_id(p_inode))
             if folder.parent is None:
                 raise pyfuse3.FUSEError(errno.ENOENT)
             inode = self.get_inode(folder.parent)
         elif name == self.mode_file.name:
             inode = self.get_inode(self.mode_file.id)
         else:
-            for f in folder.children:
-                if await self.filename(f) == name:
-                    inode = self.get_inode(f)
-                    break
+            item = await self.get_by_name(p_inode, name)
+            if item:
+                inode = self.get_inode(item)
             else:
                 raise pyfuse3.FUSEError(errno.ENOENT)
 
@@ -198,18 +204,15 @@ class RmApiFS(pyfuse3.Operations):
         return len(buf)
 
     async def rename(self, p_inode_old, name_old, p_inode_new, name_new, flags, ctx):
-        parent_old = await self.get_by_id(self.get_id(p_inode_old))
-        parent_new = await self.get_by_id(self.get_id(p_inode_new))
-        items = [i for i in parent_old.children if await self.filename(i) == name_old]
-        if not items:
+        item = await self.get_by_name(p_inode_old, name_old)
+        if item is None:
             raise pyfuse3.FUSEError(errno.ENOENT)
-        item = items[0]  # And we hope there's only this one.
-        # For now, we're going to disallow any move on top of an existing file
+
         basename = name_new.rsplit(b'.', 1)[0]
-        conflicting = [i for i in parent_new.children if i.name.encode('utf-8') == basename]
-        if p_inode_old != p_inode_new and conflicting:
+        if p_inode_old != p_inode_new and await self.get_by_name(p_inode_new, name_new):
             raise pyfuse3.FUSEError(errno.EEXIST)
 
+        parent_new = await self.get_by_id(self.get_id(p_inode_new))
         item.parent = parent_new.id
         item.name = basename.decode('utf-8')
         try:
