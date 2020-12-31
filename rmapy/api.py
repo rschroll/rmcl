@@ -25,7 +25,9 @@ from .const import (RFC3339Nano,
                     USER_TOKEN_URL,
                     DEVICE,
                     NBYTES,
-                    FILE_LIST_VALIDITY)
+                    FILE_LIST_VALIDITY,
+                    ROOT_ID,
+                    TRASH_ID)
 
 asks.init('trio')
 log = getLogger("rmapy")
@@ -61,8 +63,8 @@ class Client(object):
         if "usertoken" in config:
             self.token_set["usertoken"] = config["usertoken"]
 
-        root = VirtualFolder('', '')
-        trash = VirtualFolder('.trash', 'trash', root.id)
+        root = VirtualFolder('', ROOT_ID)
+        trash = VirtualFolder('.trash', TRASH_ID, root.id)
         self.by_id = {root.id: root, trash.id: trash}
         self.refresh_deadline = None
         self.update_lock = trio.Lock()
@@ -335,7 +337,7 @@ class Client(object):
         r = self.request("GET", document.BlobURLGet, stream=True)
         return from_request_stream(document.ID, r)
 
-    def delete(self, doc: DocumentOrFolder):
+    async def delete(self, item: Item):
         """Delete a document from the cloud.
 
         Args:
@@ -344,11 +346,12 @@ class Client(object):
             ApiError: an error occurred while uploading the document.
         """
 
-        response = self.request("PUT", "/document-storage/json/2/delete",
+        response = await self.request("PUT", "/document-storage/json/2/delete",
                                 body=[{
-                                    "ID": doc.ID,
-                                    "Version": doc.Version
+                                    "ID": item.id,
+                                    "Version": item.version
                                 }])
+        self.refresh_deadline = None
 
         return self.check_response(response)
 
@@ -379,7 +382,7 @@ class Client(object):
             raise ApiError("an error occured while uploading the document.",
                            response=response)
 
-    async def update_metadata(self, metadata):
+    async def update_metadata(self, item: Item):
         """Send an update of the current metadata of a meta object
 
         Update the meta item.
@@ -389,6 +392,8 @@ class Client(object):
                 from.
         """
 
+        # Copy the metadata so that the object gets out of date and will be refreshed
+        metadata = item._metadata.copy()
         metadata['Version'] += 1
         metadata["ModifiedClient"] = now().strftime(RFC3339Nano)
         res = await self.request("PUT",

@@ -11,3 +11,5 @@ SERVICE_MGR_URL = "https://service-manager-production-dot-remarkable-production.
 # For notes, the central directory runs 5 pages / KB, as a rough guess
 NBYTES = 1024*100
 FILE_LIST_VALIDITY = datetime.timedelta(minutes=5)
+ROOT_ID=''
+TRASH_ID='trash'

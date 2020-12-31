@@ -7,9 +7,10 @@ import zipfile
 import trio
 
 from . import api
+from .const import ROOT_ID, TRASH_ID
 from . import datacache
 from . import documentcache
-from .exceptions import DocumentNotFound
+from .exceptions import DocumentNotFound, VirtualItemError
 from .utils import now
 
 def with_lock(func):
@@ -146,7 +147,23 @@ class Item:
 
     @with_lock
     async def update_metadata(self):
-        await (await api.get_client()).update_metadata(self._metadata)
+        if self.virtual:
+            raise VirtualItemError('Cannot update virtual items')
+        await (await api.get_client()).update_metadata(self)
+
+    @with_lock
+    async def delete(self):
+        if self.virtual:
+            raise VirtualItemError('Cannot delete virtual items')
+
+        client = await api.get_client()
+        folder = self
+        while folder.parent:
+            folder = await client.get_by_id(folder.parent)
+            if folder.id == TRASH_ID:
+                return await client.delete(self)
+        self.parent = TRASH_ID
+        await client.update_metadata(self)
 
 
 class Document(Item):

@@ -9,7 +9,7 @@ import pyfuse3
 import trio
 
 from rmapy.api import get_client
-from rmapy.exceptions import ApiError
+from rmapy.exceptions import ApiError, VirtualItemError
 from rmapy.items import Document, Folder
 from rmapy.utils import now
 
@@ -28,13 +28,24 @@ class ModeFile():
         self._fs = fs
         self._metadata = FSMode.meta  # For reading from file in metadata mode
 
-        self.name = '.mode'
-        self.id = 'MODE_ID'
-        self.parent = ''
-        self.virtual = True
-
     def __repr__(self):
         return f'<{self.__class__.__name__} "{self.name}">'
+
+    @property
+    def name(self):
+        return '.mode'
+
+    @property
+    def id(self):
+        return 'MODE_ID'
+
+    @property
+    def parent(self):
+        return ''
+
+    @property
+    def virtual(self):
+        return True
 
     @property
     def mtime(self):
@@ -51,6 +62,12 @@ class ModeFile():
 
     async def size(self):
         return len(await self.contents())
+
+    async def update_metadata(self):
+        raise VirtualItemError('Cannot update .mode file')
+
+    async def delete(self):
+        raise VirtualItemError('Cannot delete .mode file')
 
 
 class RmApiFS(pyfuse3.Operations):
@@ -213,12 +230,42 @@ class RmApiFS(pyfuse3.Operations):
             raise pyfuse3.FUSEError(errno.EEXIST)
 
         parent_new = await self.get_by_id(self.get_id(p_inode_new))
-        item.parent = parent_new.id
-        item.name = basename.decode('utf-8')
         try:
+            item.parent = parent_new.id
+            item.name = basename.decode('utf-8')
             await item.update_metadata()
         except ApiError:
             raise pyfuse3.FUSEError(errno.EREMOTEIO)
+        except (VirtualItemError, AttributeError):  # AttributeError from .mode file
+            raise pyfuse3.FUSEError(errno.EPERM)
+
+    async def unlink(self, p_inode, name, ctx):
+        item = await self.get_by_name(p_inode, name)
+        if item is None:
+            raise pyfuse3.FUSEError(errno.ENOENT)
+        if isinstance(item, Folder):
+            raise pyfuse3.FUSEError(errno.EISDIR)
+        try:
+            await item.delete()
+        except ApiError:
+            raise pyfuse3.FUSEError(errno.EREMOTEIO)
+        except VirtualItemError:
+            raise pyfuse3.FUSEError(errno.EPERM)
+
+    async def rmdir(self, p_inode, name, ctx):
+        item = await self.get_by_name(p_inode, name)
+        if item is None:
+            raise pyfuse3.FUSEError(errno.ENOENT)
+        if not isinstance(item, Folder):
+            raise pyfuse3.FUSEError(errno.ENOTDIR)
+        if item.children:
+            raise pyfuse3.FUSEError(errno.ENOTEMPTY)
+        try:
+            await item.delete()
+        except ApiError:
+            raise pyfuse3.FUSEError(errno.EREMOTEIO)
+        except VirtualItemError:
+            raise pyfuse3.FUSEError(errno.EPERM)
 
 def parse_args():
     parser = argparse.ArgumentParser()
