@@ -8,7 +8,7 @@ import bidict
 import pyfuse3
 import trio
 
-from rmapy import client
+from rmapy.api import get_client
 from rmapy.items import Document, Folder
 from rmapy.utils import now
 
@@ -39,21 +39,17 @@ class ModeFile():
     def mtime(self):
         return now()
 
-    @property
-    def raw(self):
+    async def raw(self):
         return f'{self._fs.mode}\n'.encode('utf-8')
 
-    @property
-    def raw_size(self):
-        return len(self.raw)
+    async def raw_size(self):
+        return len(await self.raw())
 
-    @property
-    def contents(self):
-        return self.raw
+    async def contents(self):
+        return await self.raw()
 
-    @property
-    def size(self):
-        return len(self.contents)
+    async def size(self):
+        return len(await self.contents())
 
 
 class RmApiFS(pyfuse3.Operations):
@@ -80,12 +76,12 @@ class RmApiFS(pyfuse3.Operations):
             self.inode_map[self.next_inode()] = id_
         return self.inode_map.inverse[id_]
 
-    def get_by_id(self, id_):
+    async def get_by_id(self, id_):
         if id_ == self.mode_file.id:
             return self.mode_file
-        return client.get_by_id(id_)
+        return await (await get_client()).get_by_id(id_)
 
-    def filename(self, item, pitem):
+    async def filename(self, item, pitem):
         if item == pitem:
             return b'.'
         if pitem.parent == item.id:
@@ -98,11 +94,11 @@ class RmApiFS(pyfuse3.Operations):
         if self.mode == FSMode.raw:
             return base + b'.zip'
         if self.mode == FSMode.orig:
-            return base + b'.' + str(item.type).encode('utf-8')
+            return base + b'.' + str(await item.type()).encode('utf-8')
         return base
 
     async def lookup(self, inode_p, name, ctx=None):
-        folder = self.get_by_id(self.get_id(inode_p))
+        folder = await self.get_by_id(self.get_id(inode_p))
         if name == '.':
             inode = inode_p
         elif name == '..':
@@ -122,14 +118,14 @@ class RmApiFS(pyfuse3.Operations):
         return await self.getattr(inode, ctx)
 
     async def getattr(self, inode, ctx=None):
-        item = self.get_by_id(self.get_id(inode))
+        item = await self.get_by_id(self.get_id(inode))
         entry = pyfuse3.EntryAttributes()
         if isinstance(item, Document):
             entry.st_mode = (stat.S_IFREG | 0o444)  # TODO: Permissions?
             if self.mode == FSMode.raw:
-                entry.st_size = item.raw_size
+                entry.st_size = await item.raw_size()
             elif self.mode == FSMode.orig:
-                entry.st_size = item.size
+                entry.st_size = await item.size()
             else:
                 entry.st_size = 0
         elif isinstance(item, Folder):
@@ -137,7 +133,7 @@ class RmApiFS(pyfuse3.Operations):
             entry.st_size = 0
         elif isinstance(item, ModeFile):
             entry.st_mode = (stat.S_IFREG | 0o644)
-            entry.st_size = item.size
+            entry.st_size = await item.size()
 
         stamp = int(item.mtime.timestamp() * 1e9)
         entry.st_atime_ns = stamp
@@ -156,15 +152,15 @@ class RmApiFS(pyfuse3.Operations):
         return inode
 
     async def readdir(self, inode, start_id, token):
-        item = self.get_by_id(self.get_id(inode))
+        item = await self.get_by_id(self.get_id(inode))
         direntries = [item]
         if item.parent is not None:
-            direntries.append(self.get_by_id(item.parent))
+            direntries.append(await self.get_by_id(item.parent))
         if item.name == '':
             direntries.append(self.mode_file)
         direntries.extend(item.children)
         for i, c in enumerate(direntries[start_id:]):
-            pyfuse3.readdir_reply(token, self.filename(c, item),
+            pyfuse3.readdir_reply(token, await self.filename(c, item),
                                   await self.getattr(self.get_inode(c.id)),
                                   start_id + i + 1)
 
@@ -176,13 +172,13 @@ class RmApiFS(pyfuse3.Operations):
         return pyfuse3.FileInfo(fh=inode, direct_io=True)  # direct_io means our size doesn't have to be correct
 
     async def read(self, fh, start, size):
-        item = self.get_by_id(self.get_id(fh))
+        item = await self.get_by_id(self.get_id(fh))
         if self.mode == FSMode.meta:
             contents = f'{item._metadata!r}\n'.encode('utf-8')
         elif self.mode == FSMode.raw:
-            contents = item.raw
+            contents = await item.raw()
         elif self.mode == FSMode.orig:
-            contents = item.contents
+            contents = await item.contents()
         return contents[start:start+size]
 
     async def write(self, fh, offset, buf):
@@ -191,7 +187,7 @@ class RmApiFS(pyfuse3.Operations):
 
         command = buf.decode('utf-8').strip().lower()
         if command == 'refresh':
-            client.refresh_deadline = None
+            (await get_client()).refresh_deadline = None
             return len(buf)
 
         try:

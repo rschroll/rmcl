@@ -1,8 +1,9 @@
-import requests
+import asks
 from logging import getLogger
 from datetime import datetime
 import enum
 import io
+import trio
 from typing import Union, Optional
 from uuid import uuid4
 
@@ -27,6 +28,7 @@ from .const import (RFC3339Nano,
                     NBYTES,
                     FILE_LIST_VALIDITY)
 
+asks.init('trio')
 log = getLogger("rmapy")
 DocumentOrFolder = Union[Document, OldFolder]
 
@@ -64,11 +66,12 @@ class Client(object):
         trash = VirtualFolder('.trash', 'trash', root.id)
         self.by_id = {root.id: root, trash.id: trash}
         self.refresh_deadline = None
+        self.update_lock = trio.Lock()
 
-    def request(self, method: str, path: str,
+    async def request(self, method: str, path: str,
                 data=None,
                 body=None, headers=None,
-                params=None, stream=False) -> requests.Response:
+                params=None, stream=False) -> asks.response_objects.Response:
         """Creates a request against the Remarkable Cloud API
 
         This function automatically fills in the blanks of base
@@ -106,7 +109,7 @@ class Client(object):
         for k in headers.keys():
             _headers[k] = headers[k]
         log.debug(url, _headers)
-        r = requests.request(method, url,
+        r = await asks.request(method, url,
                              json=body,
                              data=data,
                              headers=_headers,
@@ -114,7 +117,7 @@ class Client(object):
                              stream=stream)
         return r
 
-    def register_device(self, code: str):
+    async def register_device(self, code: str):
         """Registers a device on the Remarkable Cloud.
 
         This uses a unique code the user gets from
@@ -138,7 +141,7 @@ class Client(object):
             "deviceID": uuid,
 
         }
-        response = self.request("POST", DEVICE_TOKEN_URL, body=body)
+        response = await self.request("POST", DEVICE_TOKEN_URL, body=body)
         if response.ok:
             self.token_set["devicetoken"] = response.text
             dump(self.token_set)
@@ -146,7 +149,7 @@ class Client(object):
         else:
             raise AuthError("Can't register device")
 
-    def renew_token(self):
+    async def renew_token(self):
         """Fetches a new user_token.
 
         This is the second step of the authentication of the Remarkable Cloud.
@@ -163,10 +166,10 @@ class Client(object):
         if not self.token_set["devicetoken"]:
             raise AuthError("Please register a device first")
         token = self.token_set["devicetoken"]
-        response = self.request("POST", USER_TOKEN_URL, None, headers={
+        response = await self.request("POST", USER_TOKEN_URL, None, headers={
                 "Authorization": f"Bearer {token}"
             })
-        if response.ok:
+        if response.status_code < 400:
             self.token_set["usertoken"] = response.text
             dump(self.token_set)
             return True
@@ -188,8 +191,8 @@ class Client(object):
 
     ##########
 
-    def update_items(self):
-        response = self.request('GET', '/document-storage/json/2/docs')
+    async def update_items(self):
+        response = await self.request('GET', '/document-storage/json/2/docs')
         old_ids = set(self.by_id) - {'', 'trash'}
         self.by_id[''].children = []
         self.by_id['trash'].children = []
@@ -212,30 +215,31 @@ class Client(object):
 
         self.refresh_deadline = now() + FILE_LIST_VALIDITY
 
-    def get_by_id(self, id_):
-        if not self.refresh_deadline or now() > self.refresh_deadline:
-            self.update_items()
+    async def get_by_id(self, id_):
+        async with self.update_lock:
+            if not self.refresh_deadline or now() > self.refresh_deadline:
+                await self.update_items()
 
         return self.by_id[id_]
 
-    def get_metadata(self, id_, downloadable=True):
-        response = self.request('GET', '/document-storage/json/2/docs',
+    async def get_metadata(self, id_, downloadable=True):
+        response = await self.request('GET', '/document-storage/json/2/docs',
                                 params={'doc': id_, 'withBlob': downloadable})
         for meta in response.json():
             if meta['ID'] == id_:
                 return meta
         raise DocumentNotFound(f"Could not find document {id_}")
 
-    def get_blob(self, url):
-        response = self.request('GET', url)
+    async def get_blob(self, url):
+        response = await self.request('GET', url)
         return response.content
 
-    def get_blob_size(self, url):
-        response = self.request('HEAD', url)
+    async def get_blob_size(self, url):
+        response = await self.request('HEAD', url)
         return int(response.headers.get('Content-Length', 0))
 
-    def get_file_details(self, url):
-        response = self.request('GET', url, headers={'Range': f'bytes=-{NBYTES}'})
+    async def get_file_details(self, url):
+        response = await self.request('GET', url, headers={'Range': f'bytes=-{NBYTES}'})
         # Want to start a known file extension - file name length - fixed header length
         key_index = response.content.rfind(b'.content') - 36 - 46
         if key_index < 0:
@@ -472,7 +476,7 @@ class Client(object):
         return True
 
     @staticmethod
-    def check_response(response: requests.Response):
+    def check_response(response: asks.response_objects.Response):
         """Check the response from an API Call
 
         Does some sanity checking on the Response
@@ -509,13 +513,10 @@ class Client(object):
 
 
 _client = None
-
-def __getattr__(name):
+async def get_client():
     global _client
-    if name == 'client':
-        if _client is None:
-            print("Gettting client!")
-            _client = Client()
-            _client.renew_token()
-        return _client
-    raise AttributeError(f'module {__name__} has no attribute {name}')
+    if _client is None:
+        print("Gettting client!")
+        _client = Client()
+        await _client.renew_token()
+    return _client
