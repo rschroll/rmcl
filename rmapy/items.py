@@ -1,5 +1,6 @@
 import datetime
 import io
+import json
 import logging
 import re
 import uuid
@@ -186,7 +187,7 @@ class Item:
         await client.update_metadata(self)
 
     @with_lock
-    async def upload(self, new_contents):
+    async def upload_raw(self, new_contents):
         if self.virtual:
             raise VirtualFolder('Cannot update virtual items')
         await (await api.get_client()).upload(self, new_contents)
@@ -211,6 +212,30 @@ class Document(Item):
             documentcache.set_document(self.id, self.version, 'orig', contents)
         return contents
 
+    async def upload(self, new_contents, type_):
+        if type_ not in (api.FileType.pdf, api.FileType.epub):
+            raise TypeError(f"Cannot upload file of type {type_}")
+
+        content = {
+            'extraMetadata': {},
+            'fileType': str(type_),
+            'lastOpenedPage': 0,
+            'lineHeight': -1,
+            'margins': 100,
+            'pageCount': 0,
+            'textScale': 1,
+            'transform': {},
+        }
+
+        f = io.BytesIO()
+        with zipfile.ZipFile(f, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(f'{self.id}.pagedata','')
+            zf.writestr(f'{self.id}.content', json.dumps(content))
+            zf.writestr(f'{self.id}.{type_}', new_contents.read())
+        f.seek(0)
+
+        return await self.upload_raw(f)
+
 
 class Folder(Item):
 
@@ -219,14 +244,12 @@ class Folder(Item):
         self.children = []
 
     async def upload(self):
-        return await super().upload(self._zip_file())
-
-    def _zip_file(self):
         f = io.BytesIO()
         with zipfile.ZipFile(f, 'w', zipfile.ZIP_DEFLATED) as zf:
             zf.writestr(f'{self.id}.content', '')
         f.seek(0)
-        return f
+
+        return await self.upload_raw(f)
 
 
 class VirtualFolder(Folder):
