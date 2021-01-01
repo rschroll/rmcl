@@ -1,6 +1,7 @@
 import argparse
 import enum
 import errno
+import io
 import os
 import stat
 
@@ -8,7 +9,7 @@ import bidict
 import pyfuse3
 import trio
 
-from rmapy.api import get_client
+from rmapy.api import get_client, FileType
 from rmapy.const import ROOT_ID
 from rmapy.exceptions import ApiError, VirtualItemError
 from rmapy.items import Document, Folder
@@ -70,6 +71,18 @@ class ModeFile():
     async def delete(self):
         raise VirtualItemError('Cannot delete .mode file')
 
+    async def write(self, offset, buf):
+        command = buf.decode('utf-8').strip().lower()
+        if command == 'refresh':
+            (await get_client()).refresh_deadline = None
+            return len(buf)
+
+        try:
+            self._fs.mode = FSMode[command]
+        except KeyError:
+            raise pyfuse3.FUSEError(errno.EINVAL)  # Invalid argument
+        return len(buf)
+
 
 class RmApiFS(pyfuse3.Operations):
 
@@ -81,6 +94,7 @@ class RmApiFS(pyfuse3.Operations):
         self.mode = mode
         self.mode_file = ModeFile(self)
         self.inode_map[self.next_inode()] = self.mode_file.id
+        self.buffers = dict()
 
     def next_inode(self):
         value = self._next_inode
@@ -143,24 +157,30 @@ class RmApiFS(pyfuse3.Operations):
         return await self.getattr(inode, ctx)
 
     async def getattr(self, inode, ctx=None):
-        item = await self.get_by_id(self.get_id(inode))
         entry = pyfuse3.EntryAttributes()
-        if isinstance(item, Document):
-            entry.st_mode = (stat.S_IFREG | 0o444)  # TODO: Permissions?
-            if self.mode == FSMode.raw:
-                entry.st_size = await item.raw_size()
-            elif self.mode == FSMode.orig:
-                entry.st_size = await item.size()
-            else:
-                entry.st_size = 0
-        elif isinstance(item, Folder):
-            entry.st_mode = (stat.S_IFDIR | 0o755)
-            entry.st_size = 0
-        elif isinstance(item, ModeFile):
-            entry.st_mode = (stat.S_IFREG | 0o644)
-            entry.st_size = await item.size()
 
-        stamp = int(item.mtime.timestamp() * 1e9)
+        if inode in self.buffers:
+            entry.st_mode = (stat.S_IFREG | 0o644)
+            entry.st_size = 0
+            stamp = int(now().timestamp() * 1e9)
+        else:
+            item = await self.get_by_id(self.get_id(inode))
+            if isinstance(item, Document):
+                entry.st_mode = (stat.S_IFREG | 0o444)  # TODO: Permissions?
+                if self.mode == FSMode.raw:
+                    entry.st_size = await item.raw_size()
+                elif self.mode == FSMode.orig:
+                    entry.st_size = await item.size()
+                else:
+                    entry.st_size = 0
+            elif isinstance(item, Folder):
+                entry.st_mode = (stat.S_IFDIR | 0o755)
+                entry.st_size = 0
+            elif isinstance(item, ModeFile):
+                entry.st_mode = (stat.S_IFREG | 0o644)
+                entry.st_size = await item.size()
+            stamp = int(item.mtime.timestamp() * 1e9)
+
         entry.st_atime_ns = stamp
         entry.st_ctime_ns = stamp
         entry.st_mtime_ns = stamp
@@ -207,19 +227,35 @@ class RmApiFS(pyfuse3.Operations):
         return contents[start:start+size]
 
     async def write(self, fh, offset, buf):
-        if self.get_id(fh) != self.mode_file.id:
-            raise pyfuse3.FUSEError(errno.EPERM)
+        if self.get_id(fh) == self.mode_file.id:
+            return await self.mode_file.write(offset, buf)
 
-        command = buf.decode('utf-8').strip().lower()
-        if command == 'refresh':
-            (await get_client()).refresh_deadline = None
+        if fh in self.buffers:
+            document, data = self.buffers[fh]
+            self.buffers[fh] = (document, data[:offset] + buf + data[offset + len(buf):])
             return len(buf)
 
+        raise pyfuse3.FUSEError(errno.EPERM)
+
+    async def release(self, fh):
+        if fh not in self.buffers:
+            return
+
+        document, data = self.buffers[fh]
+        if data.startswith(b'%PDF'):
+            type_ = FileType.pdf
+        elif b'mimetypeapplication/epub+zip' in data[:100]:
+            type_ = FileType.epub
+        else:
+            print('Error: Not a PDF or EPUB file')
+            raise pyfuse3.FUSEError(errno.EIO)  # Unfortunately, this will be ignored
         try:
-            self.mode = FSMode[command]
-        except KeyError:
-            raise pyfuse3.FUSEError(errno.EINVAL)  # Invalid argument
-        return len(buf)
+            await document.upload(io.BytesIO(data), type_)
+        except ApiError as error:
+            print('API Error:', error)
+            raise pyfuse3.FUSEError(errno.EREMOTEIO)  # Unfortunately, this will be ignored
+        finally:
+            del self.buffers[fh]
 
     async def rename(self, p_inode_old, name_old, p_inode_new, name_new, flags, ctx):
         item = await self.get_by_name(p_inode_old, name_old)
@@ -267,6 +303,17 @@ class RmApiFS(pyfuse3.Operations):
             raise pyfuse3.FUSEError(errno.EREMOTEIO)
         except VirtualItemError:
             raise pyfuse3.FUSEError(errno.EPERM)
+
+    async def create(self, p_inode, name, mode, flags, ctx):
+        existing = await self.get_by_name(p_inode, name)
+        if existing:
+            raise pyfuse3.FUSEError(errno.EEXIST)
+        parent = self.get_id(p_inode)
+        basename = name.decode('utf-8').rsplit('.', 1)[0]
+        document = Document.new(basename, parent)
+        inode = self.get_inode(document.id)
+        self.buffers[inode] = (document, b'')
+        return (pyfuse3.FileInfo(fh=inode, direct_io=True), await self.getattr(inode, ctx))
 
     async def mkdir(self, p_inode, name, mode, ctx):
         existing = await self.get_by_name(p_inode, name)
