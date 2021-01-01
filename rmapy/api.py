@@ -3,21 +3,16 @@ from logging import getLogger
 import enum
 import io
 import trio
-from typing import Union, Optional
 from uuid import uuid4
 
-from .collections import Collection
 from .config import load, dump
-from .document import Document, ZipDocument, from_request_stream
-from .folder import Folder as OldFolder
 from .items import Item, Folder, VirtualFolder
 from .utils import now
 from .zipdir import ZipHeader
 from .exceptions import (
     AuthError,
     DocumentNotFound,
-    ApiError,
-    UnsupportedTypeError,)
+    ApiError,)
 from .const import (RFC3339Nano,
                     USER_AGENT,
                     BASE_URL,
@@ -31,7 +26,6 @@ from .const import (RFC3339Nano,
 
 asks.init('trio')
 log = getLogger("rmapy")
-DocumentOrFolder = Union[Document, OldFolder]
 
 
 class FileType(enum.Enum):
@@ -70,9 +64,9 @@ class Client(object):
         self.update_lock = trio.Lock()
 
     async def request(self, method: str, path: str,
-                data=None,
-                body=None, headers=None,
-                params=None, stream=False) -> asks.response_objects.Response:
+                      data=None,
+                      body=None, headers=None,
+                      params=None, stream=False) -> asks.response_objects.Response:
         """Creates a request against the Remarkable Cloud API
 
         This function automatically fills in the blanks of base
@@ -110,13 +104,12 @@ class Client(object):
         for k in headers.keys():
             _headers[k] = headers[k]
         log.debug(url, _headers)
-        r = await asks.request(method, url,
-                             json=body,
-                             data=data,
-                             headers=_headers,
-                             params=params,
-                             stream=stream)
-        return r
+        return await asks.request(method, url,
+                                  json=body,
+                                  data=data,
+                                  headers=_headers,
+                                  params=params,
+                                  stream=stream)
 
     async def register_device(self, code: str):
         """Registers a device on the Remarkable Cloud.
@@ -185,12 +178,7 @@ class Client(object):
             bool: True if the client is authenticated
         """
 
-        if self.token_set["devicetoken"] and self.token_set["usertoken"]:
-            return True
-        else:
-            return False
-
-    ##########
+        return self.token_set["devicetoken"] and self.token_set["usertoken"]
 
     async def update_items(self):
         response = await self.request('GET', '/document-storage/json/2/docs')
@@ -256,87 +244,6 @@ class Client(object):
             item = ZipHeader.from_stream(stream)
         return FileType.notes, None
 
-    ##########
-
-    def get_meta_items(self) -> Collection:
-        """Returns a new collection from meta items.
-
-        It fetches all meta items from the Remarkable Cloud and stores them
-        in a collection, wrapping them in the correct class.
-
-        Returns:
-            Collection: a collection of Documents & Folders from the Remarkable
-                Cloud
-        """
-
-        response = self.request("GET", "/document-storage/json/2/docs")
-        collection = Collection()
-        log.debug(response.text)
-        for item in response.json():
-            collection.add(item)
-
-        return collection
-
-    def get_doc(self, _id: str) -> Optional[DocumentOrFolder]:
-        """Get a meta item by ID
-
-        Fetch a meta item from the Remarkable Cloud by ID.
-
-        Args:
-            _id: The id of the meta item.
-
-        Returns:
-            A Document or Folder instance of the requested ID.
-        Raises:
-            DocumentNotFound: When a document cannot be found.
-        """
-
-        log.debug(f"GETTING DOC {_id}")
-        response = self.request("GET", "/document-storage/json/2/docs",
-                                params={
-                                    "doc": _id,
-                                    "withBlob": True
-                                })
-        log.debug(response.url)
-        data_response = response.json()
-        log.debug(data_response)
-
-        if len(data_response) > 0:
-            if data_response[0]["Type"] == "CollectionType":
-                return OldFolder(**data_response[0])
-            elif data_response[0]["Type"] == "DocumentType":
-                return Document(**data_response[0])
-        else:
-            raise DocumentNotFound(f"Could not find document {_id}")
-        return None
-
-    def download(self, document: Document) -> ZipDocument:
-        """Download a ZipDocument
-
-        This will download a raw document from the Remarkable Cloud containing
-        the real document. See the documentation for ZipDocument for more
-        information.
-
-        Args:
-            document: A Document instance we should download
-
-        Returns:
-            A ZipDocument instance, containing the raw data files from a
-            document.
-        """
-
-        if not document.BlobURLGet:
-            doc = self.get_doc(document.ID)
-            if isinstance(doc, Document):
-                document = doc
-            else:
-                raise UnsupportedTypeError(
-                    "We expected a document, got {type}"
-                    .format(type=type(doc)))
-        log.debug("BLOB", document.BlobURLGet)
-        r = self.request("GET", document.BlobURLGet, stream=True)
-        return from_request_stream(document.ID, r)
-
     async def delete(self, item: Item):
         """Delete a document from the cloud.
 
@@ -347,40 +254,13 @@ class Client(object):
         """
 
         response = await self.request("PUT", "/document-storage/json/2/delete",
-                                body=[{
-                                    "ID": item.id,
-                                    "Version": item.version
-                                }])
+                                      body=[{
+                                          "ID": item.id,
+                                          "Version": item.version
+                                      }])
         self.refresh_deadline = None
 
         return self.check_response(response)
-
-    def upload(self, zip_doc: ZipDocument, to: OldFolder = OldFolder(ID="")):
-        """Upload a document to the cloud.
-
-        Add a new document to the Remarkable Cloud.
-
-        Args:
-            zip_doc: A ZipDocument instance containing the data of a Document.
-            to: the parent of the document. (Default root)
-        Raises:
-            ApiError: an error occurred while uploading the document.
-
-        """
-
-        blob_url_put = self._upload_request(zip_doc)
-        zip_doc.dump(zip_doc.zipfile)
-        response = self.request("PUT", blob_url_put, data=zip_doc.zipfile.read())
-        # Reset seek
-        zip_doc.zipfile.seek(0)
-        if response.ok:
-            doc = Document(**zip_doc.metadata)
-            doc.ID = zip_doc.ID
-            doc.Parent = to.ID
-            return self.update_metadata(doc)
-        else:
-            raise ApiError("an error occured while uploading the document.",
-                           response=response)
 
     async def update_metadata(self, item: Item):
         """Send an update of the current metadata of a meta object
@@ -397,87 +277,11 @@ class Client(object):
         metadata['Version'] += 1
         metadata["ModifiedClient"] = now().strftime(RFC3339Nano)
         res = await self.request("PUT",
-                           "/document-storage/json/2/upload/update-status",
-                           body=[metadata])
+                                 "/document-storage/json/2/upload/update-status",
+                                 body=[metadata])
         self.refresh_deadline = None
 
         return self.check_response(res)
-
-    def get_current_version(self, docorfolder: DocumentOrFolder) -> int:
-        """Get the latest version info from a Document or Folder
-
-        This fetches the latest meta information from the Remarkable Cloud
-        and returns the version information.
-
-        Args:
-            docorfolder: A Document or Folder instance.
-        Returns:
-            the version information.
-        Raises:
-            DocumentNotFound: cannot find the requested Document or Folder.
-            ApiError: An error occurred while processing the request.
-        """
-
-        try:
-            d = self.get_doc(docorfolder.ID)
-        except DocumentNotFound:
-            return 0
-        if not d:
-            return 0
-        return int(d.Version)
-
-    def _upload_request(self, zip_doc: ZipDocument) -> str:
-        zip_file, req = zip_doc.create_request()
-        res = self.request("PUT", "/document-storage/json/2/upload/request",
-                           body=[req])
-        if not res.ok:
-            raise ApiError(
-                     f"upload request failed with status {res.status_code}",
-                     response=res)
-        response = res.json()
-        if len(response) > 0:
-            dest = response[0].get("BlobURLPut", None)
-            if dest:
-                return dest
-            else:
-                raise ApiError(
-                    "Cannot create a folder. because BlobURLPut is not set",
-                    response=res)
-
-    def create_folder(self, folder: OldFolder):
-        """Create a new folder meta object.
-
-        This needs to be done in 3 steps:
-
-        #. Create an upload request for a new CollectionType meta object.
-        #. Upload a zipfile with a *.content file containing an empty object.
-        #. Update the meta object with the new name.
-
-        Args:
-            folder: A folder instance.
-        Returns:
-            True if the folder is created.
-        """
-
-        zip_folder, req = folder.create_request()
-        res = self.request("PUT", "/document-storage/json/2/upload/request",
-                           body=[req])
-        if not res.ok:
-            raise ApiError(
-                     f"upload request failed with status {res.status_code}",
-                     response=res)
-        response = res.json()
-        if len(response) > 0:
-            dest = response[0].get("BlobURLPut", None)
-            if dest:
-                res = self.request("PUT", dest, data=zip_folder.read())
-            else:
-                raise ApiError(
-                    "Cannot create a folder. because BlobURLPut is not set",
-                    response=res)
-        if res.ok:
-            self.update_metadata(folder)
-        return True
 
     async def upload(self, item, contents):
         res = await self.request('PUT', '/document-storage/json/2/upload/request',
@@ -491,7 +295,7 @@ class Client(object):
             dest = res.json()[0]['BlobURLPut']
         except (IndexError, KeyError):
             log.error("Failed to get upload URL")
-            raise ApiError(f"Failed to get upload URL", response=res)
+            raise ApiError("Failed to get upload URL", response=res)
         up_res = await self.request('PUT', dest, data=contents.read(),
                                     headers={'Content-Type': ''})
         if up_res.status_code >= 400:
@@ -515,25 +319,22 @@ class Client(object):
             ApiError: When the response contains an error
         """
 
-        if response.status_code < 400:
-            if len(response.json()) > 0:
-                if response.json()[0]["Success"]:
-                    return True
-                else:
-                    log.error("Got A non success response")
-                    msg = response.json()[0]["Message"]
-                    log.error(msg)
-                    raise ApiError(f"{msg}",
-                                   response=response)
-            else:
-                log.error("Got An empty response")
-                raise ApiError("Got An empty response",
-                               response=response)
-        else:
+        if response.status_code >= 400:
             log.error(f"Got An invalid HTTP Response: {response.status_code}")
-            raise ApiError(
-                f"Got An invalid HTTP Response: {response.status_code}",
-                response=response)
+            raise ApiError(f"Got An invalid HTTP Response: {response.status_code}",
+                           response=response)
+
+        if len(response.json()) == 0:
+            log.error("Got an empty response")
+            raise ApiError("Got An empty response", response=response)
+
+        if not response.json()[0]["Success"]:
+            log.error("Got a non-success response")
+            msg = response.json()[0]["Message"]
+            log.error(msg)
+            raise ApiError(msg, response=response)
+
+        return True
 
 
 _client = None
