@@ -189,7 +189,7 @@ class Item:
     @with_lock
     async def upload_raw(self, new_contents):
         if self.virtual:
-            raise VirtualFolder('Cannot update virtual items')
+            raise VirtualItemError('Cannot update virtual items')
         await (await api.get_client()).upload(self, new_contents)
 
 

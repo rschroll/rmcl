@@ -323,7 +323,7 @@ class RmApiFS(pyfuse3.Operations):
         folder = Folder.new(name.decode('utf-8'), parent)
         try:
             await folder.upload()
-        except ApiError as error:
+        except ApiError:
             raise pyfuse3.FUSEError(errno.EREMOTEIO)
         except VirtualItemError:
             raise pyfuse3.FUSEError(errno.EPERM)

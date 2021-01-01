@@ -38,7 +38,7 @@ class FileType(enum.Enum):
         return self.name
 
 
-class Client(object):
+class Client:
     """API Client for Remarkable Cloud
 
     This allows you to authenticate & communicate with the Remarkable Cloud
