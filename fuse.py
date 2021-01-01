@@ -268,6 +268,22 @@ class RmApiFS(pyfuse3.Operations):
         except VirtualItemError:
             raise pyfuse3.FUSEError(errno.EPERM)
 
+    async def mkdir(self, p_inode, name, mode, ctx):
+        existing = await self.get_by_name(p_inode, name)
+        if existing:
+            raise pyfuse3.FUSEError(errno.EEXIST)
+        parent = self.get_id(p_inode)
+        folder = Folder.new(name.decode('utf-8'), parent)
+        try:
+            await folder.upload()
+        except ApiError as error:
+            raise pyfuse3.FUSEError(errno.EREMOTEIO)
+        except VirtualItemError:
+            raise pyfuse3.FUSEError(errno.EPERM)
+
+        inode = self.get_inode(folder.id)
+        return await self.getattr(inode)
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('mountpoint', type=str, help="Mount point of filesystem")

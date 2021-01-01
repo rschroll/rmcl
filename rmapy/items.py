@@ -2,6 +2,7 @@ import datetime
 import io
 import logging
 import re
+import uuid
 import zipfile
 
 import trio
@@ -46,6 +47,25 @@ class Item:
             return Folder(metadata)
         logging.error(f"Unknown document type: {type_}")
         return None
+
+    @classmethod
+    def new(cls, name, parent_id):
+        if issubclass(cls, Document):
+            type_ = cls.DOCUMENT
+        elif issubclass(cls, Folder):
+            type_ = cls.FOLDER
+        else:
+            logging.error(f"Cannot create a new item of class {cls}")
+            return None
+
+        metadata = {
+            'VissibleName': name,
+            'ID': str(uuid.uuid4()),
+            'Version': 0,
+            'Parent': parent_id,
+            'Type': type_
+        }
+        return cls(metadata)
 
     def __init__(self, metadata):
         self._metadata = metadata
@@ -165,6 +185,12 @@ class Item:
         self.parent = TRASH_ID
         await client.update_metadata(self)
 
+    @with_lock
+    async def upload(self, new_contents):
+        if self.virtual:
+            raise VirtualFolder('Cannot update virtual items')
+        await (await api.get_client()).upload(self, new_contents)
+
 
 class Document(Item):
 
@@ -191,6 +217,16 @@ class Folder(Item):
     def __init__(self, metadata):
         super().__init__(metadata)
         self.children = []
+
+    async def upload(self):
+        return await super().upload(self._zip_file())
+
+    def _zip_file(self):
+        f = io.BytesIO()
+        with zipfile.ZipFile(f, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(f'{self.id}.content', '')
+        f.seek(0)
+        return f
 
 
 class VirtualFolder(Folder):

@@ -479,6 +479,26 @@ class Client(object):
             self.update_metadata(folder)
         return True
 
+    async def upload(self, item, contents):
+        res = await self.request('PUT', '/document-storage/json/2/upload/request',
+                                 body=[{
+                                     'ID': item.id,
+                                     'Version': item.version + 1,
+                                     'Type': item._metadata['Type']
+                                 }])
+        self.check_response(res)
+        try:
+            dest = res.json()[0]['BlobURLPut']
+        except (IndexError, KeyError):
+            log.error("Failed to get upload URL")
+            raise ApiError(f"Failed to get upload URL", response=res)
+        up_res = await self.request('PUT', dest, data=contents.read(),
+                                    headers={'Content-Type': ''})
+        if up_res.status_code >= 400:
+            log.error(f"Upload failed with status {up_res.status_code}")
+            raise ApiError(f"Upload failed with status {up_res.status_code}", response=up_res)
+        await self.update_metadata(item)
+
     @staticmethod
     def check_response(response: asks.response_objects.Response):
         """Check the response from an API Call
