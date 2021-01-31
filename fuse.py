@@ -9,11 +9,11 @@ import bidict
 import pyfuse3
 import trio
 
-from rmapy.api import get_client, FileType
-from rmapy.const import ROOT_ID
-from rmapy.exceptions import ApiError, VirtualItemError
-from rmapy.items import Document, Folder
-from rmapy.utils import now
+from rmcl.api import get_client, FileType
+from rmcl.const import ROOT_ID
+from rmcl.exceptions import ApiError, VirtualItemError
+from rmcl.items import Document, Folder
+from rmcl.utils import now
 
 class FSMode(enum.Enum):
     meta = 'meta'

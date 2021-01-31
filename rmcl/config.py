@@ -3,31 +3,29 @@ from yaml import BaseLoader
 from yaml import load as yml_load
 from yaml import dump as yml_dump
 from typing import Dict
+from xdg import xdg_config_home
+
+CONFIG_FILE = xdg_config_home() / 'rmcl' / 'config.yaml'
 
 
 def load() -> dict:
-    """Load the .rmapy config file"""
+    """Load the config file"""
 
-    config_file_path = Path.joinpath(Path.home(), ".rmapi")
     config: Dict[str, str] = {}
-    if Path.exists(config_file_path):
-        with open(config_file_path, 'r') as config_file:
+    if CONFIG_FILE.exists():
+        with CONFIG_FILE.open('r') as config_file:
             config = dict(yml_load(config_file.read(), Loader=BaseLoader))
 
     return config
 
 
 def dump(config: dict) -> None:
-    """Dump config to the .rmapy config file
+    """Dump config to the config file
 
     Args:
-        config: A dict containing data to dump to the .rmapi
+        config: A dict containing data to dump to the
             config file.
     """
 
-    config_file_path = Path.joinpath(Path.home(), ".rmapi")
-
-    with open(config_file_path, 'w') as config_file:
+    with CONFIG_FILE.open('w') as config_file:
         config_file.write(yml_dump(config))
-
-

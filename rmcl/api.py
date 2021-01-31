@@ -26,7 +26,7 @@ from .const import (RFC3339Nano,
                     TRASH_ID)
 
 asks.init('trio')
-log = getLogger("rmapy")
+log = getLogger(__name__)
 
 
 class FileType(enum.Enum):
