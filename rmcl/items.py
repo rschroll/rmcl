@@ -8,6 +8,10 @@ import uuid
 import zipfile
 
 import trio
+try:
+    from rmrl import render, sources
+except ImportError:
+    render = None
 
 from . import api
 from .const import ROOT_ID, TRASH_ID, FileType
@@ -196,6 +200,10 @@ class Item:
 
 class Document(Item):
 
+    def __init__(self, *args, **kw):
+        super().__init__(*args, **kw)
+        self._annotated_size = datacache.get_property(self.id, self.version, 'annotated_size')
+
     async def contents(self):
         if await self.type() in (FileType.notes, FileType.unknown):
             return await self.raw()
@@ -236,6 +244,24 @@ class Document(Item):
         f.seek(0)
 
         return await self.upload_raw(f)
+
+    async def annotated(self):
+        if render is None:
+            raise ImportError("rmrl must be installed to get annotated documents")
+
+        contents = documentcache.get_document(self.id, self.version, 'annot')
+        if contents is None:
+            zf = zipfile.ZipFile(io.BytesIO(await self.raw()), 'r')
+            contents = render(sources.ZipSource(zf)).read()
+            documentcache.set_document(self.id, self.version, 'annot', contents)
+            self._annotated_size = len(contents)
+            datacache.set_property(self.id, self.version, 'annotated_size', self._annotated_size)
+        return contents
+
+    async def annotated_size(self):
+        if self._annotated_size is not None:
+            return self._annotated_size
+        return await self.size()
 
 
 class Folder(Item):

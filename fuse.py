@@ -21,6 +21,7 @@ class FSMode(enum.Enum):
     meta = 'meta'
     raw = 'raw'
     orig = 'orig'
+    annot = 'annot'
 
     def __str__(self):
         return self.name
@@ -128,6 +129,9 @@ class RmApiFS(pyfuse3.Operations):
 
         if self.mode == FSMode.raw:
             return base + b'.zip'
+        if self.mode == FSMode.annot or (self.mode == FSMode.orig and
+                                         await item.type() == FileType.notes):
+            return base + b'.pdf'
         if self.mode == FSMode.orig:
             return base + b'.' + str(await item.type()).encode('utf-8')
         return base
@@ -171,6 +175,9 @@ class RmApiFS(pyfuse3.Operations):
                 entry.st_mode = (stat.S_IFREG | 0o444)  # TODO: Permissions?
                 if self.mode == FSMode.raw:
                     entry.st_size = await item.raw_size()
+                elif self.mode == FSMode.annot or (self.mode == FSMode.orig and
+                                                   await item.type() == FileType.notes):
+                    entry.st_size = await item.annotated_size()
                 elif self.mode == FSMode.orig:
                     entry.st_size = await item.size()
                 else:
@@ -224,6 +231,9 @@ class RmApiFS(pyfuse3.Operations):
             contents = f'{item._metadata!r}\n'.encode('utf-8')
         elif self.mode == FSMode.raw:
             contents = await item.raw()
+        elif self.mode == FSMode.annot or (self.mode == FSMode.orig and
+                                           await item.type() == FileType.notes):
+            contents = await item.annotated()
         elif self.mode == FSMode.orig:
             contents = await item.contents()
         return contents[start:start+size]
@@ -339,7 +349,7 @@ def parse_args():
     parser.add_argument('-d', '--debug', action='store_true', default=False,
                         help="Enable debugging output")
     parser.add_argument('-m', '--mode', type=FSMode, choices=list(FSMode),
-                        default=FSMode.raw, help="Type of files to mount")
+                        default=FSMode.annot, help="Type of files to mount")
     return parser.parse_args()
 
 def main(options):

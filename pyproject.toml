@@ -17,6 +17,7 @@ ipython = "^7.19.0"
 jedi = "0.17.2"
 bidict = "^0.21.2"
 pyfuse3 = "^3.2.0"
+rmrl = "^0.1.2"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
