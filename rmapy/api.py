@@ -2,6 +2,7 @@ import asks
 from logging import getLogger
 import enum
 import io
+import json
 import trio
 from uuid import uuid4
 
@@ -182,10 +183,17 @@ class Client:
 
     async def update_items(self):
         response = await self.request('GET', '/document-storage/json/2/docs')
+        try:
+            response_json = response.json()
+        except json.decoder.JSONDecodeError:
+            log.error(f"Failed to decode JSON from {response.content}")
+            log.error(f"Response code: {response.status_code}")
+            raise ApiError("Failed to decode JSON data")
+
         old_ids = set(self.by_id) - {'', 'trash'}
         self.by_id[''].children = []
         self.by_id['trash'].children = []
-        for item in response.json():
+        for item in response_json:
             old = self.by_id.get(item['ID'])
             if old:
                 old_ids.remove(old.id)
