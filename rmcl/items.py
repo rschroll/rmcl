@@ -1,22 +1,20 @@
 # Copyright 2020-2021 Robert Schroll
 # This file is part of rmcl and is distributed under the MIT license.
 
-import datetime
 import io
 import json
 import logging
-import re
 import uuid
 import zipfile
 
 import trio
 
 from . import api
-from .const import ROOT_ID, TRASH_ID
+from .const import ROOT_ID, TRASH_ID, FileType
 from . import datacache
 from . import documentcache
 from .exceptions import DocumentNotFound, VirtualItemError
-from .utils import now
+from .utils import now, parse_datetime
 
 def with_lock(func):
     async def decorated(self, *args, **kw):
@@ -33,14 +31,6 @@ class Item:
 
     DOCUMENT = 'DocumentType'
     FOLDER = 'CollectionType'
-
-    @staticmethod
-    def parse_datetime(dt):
-        # fromisoformat needs 0, 3, or 6 decimal places for the second, but
-        # we can get other numbers from the API.  Since we're not doing anything
-        # that time-sensitive, we'll just chop off the fractional seconds.
-        dt = re.sub(r'\.\d*', '', dt).replace('Z', '+00:00')
-        return datetime.datetime.fromisoformat(dt)
 
     @classmethod
     def from_metadata(cls, metadata):
@@ -76,7 +66,7 @@ class Item:
         self._raw_size = datacache.get_property(self.id, self.version, 'raw_size') or 0
         self._size = datacache.get_property(self.id, self.version, 'size') or 0
         try:
-            self._type = api.FileType[datacache.get_property(self.id, self.version, 'type')]
+            self._type = FileType[datacache.get_property(self.id, self.version, 'type')]
         except KeyError:
             self._type = None
         self._lock = trio.Lock()
@@ -107,7 +97,7 @@ class Item:
 
     @property
     def mtime(self):
-        return self.parse_datetime(self._metadata.get('ModifiedClient'))
+        return parse_datetime(self._metadata.get('ModifiedClient'))
 
     @property
     def virtual(self):
@@ -125,11 +115,11 @@ class Item:
     @with_lock
     async def download_url(self):
         if not (self._metadata['BlobURLGet'] and
-                self.parse_datetime(self._metadata['BlobURLGetExpires']) > now()):
+                parse_datetime(self._metadata['BlobURLGetExpires']) > now()):
             await self.refresh_metadata(downloadable=True)
         # This could have failed...
         url = self._metadata['BlobURLGet']
-        if url and self.parse_datetime(self._metadata['BlobURLGetExpires']) > now():
+        if url and parse_datetime(self._metadata['BlobURLGetExpires']) > now():
             return url
         return None
 
@@ -156,7 +146,7 @@ class Item:
             if self._size is None:
                 self._size = await self.raw_size()
             datacache.set_property(self.id, self.version, 'size', self._size)
-            if self._type != api.FileType.unknown:
+            if self._type != FileType.unknown:
                 # Try again the next time we start up.
                 datacache.set_property(self.id, self.version, 'type', str(self._type))
             print('  Got', self._type, self._size)
@@ -199,7 +189,7 @@ class Item:
 class Document(Item):
 
     async def contents(self):
-        if await self.type() in (api.FileType.notes, api.FileType.unknown):
+        if await self.type() in (FileType.notes, FileType.unknown):
             return await self.raw()
 
         contents = documentcache.get_document(self.id, self.version, 'orig')
@@ -216,7 +206,7 @@ class Document(Item):
         return contents
 
     async def upload(self, new_contents, type_):
-        if type_ not in (api.FileType.pdf, api.FileType.epub):
+        if type_ not in (FileType.pdf, FileType.epub):
             raise TypeError(f"Cannot upload file of type {type_}")
 
         content = {

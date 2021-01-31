@@ -1,4 +1,5 @@
 import datetime
+import enum
 
 RFC3339Nano = "%Y-%m-%dT%H:%M:%SZ"
 USER_AGENT = "rmcl <https://github.com/rschroll/rmcl>"
@@ -13,3 +14,13 @@ NBYTES = 1024*100
 FILE_LIST_VALIDITY = datetime.timedelta(minutes=5)
 ROOT_ID=''
 TRASH_ID='trash'
+
+
+class FileType(enum.Enum):
+    pdf = 'pdf'
+    epub = 'epub'
+    notes = 'notes'
+    unknown = 'unknown'
+
+    def __str__(self):
+        return self.name

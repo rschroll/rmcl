@@ -27,20 +27,11 @@ from .const import (RFC3339Nano,
                     NBYTES,
                     FILE_LIST_VALIDITY,
                     ROOT_ID,
-                    TRASH_ID)
+                    TRASH_ID,
+                    FileType)
 
 asks.init('trio')
 log = getLogger(__name__)
-
-
-class FileType(enum.Enum):
-    pdf = 'pdf'
-    epub = 'epub'
-    notes = 'notes'
-    unknown = 'unknown'
-
-    def __str__(self):
-        return self.name
 
 
 class Client:

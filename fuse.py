@@ -12,8 +12,8 @@ import bidict
 import pyfuse3
 import trio
 
-from rmcl.api import get_client, FileType
-from rmcl.const import ROOT_ID
+from rmcl.api import get_client
+from rmcl.const import ROOT_ID, FileType
 from rmcl.exceptions import ApiError, VirtualItemError
 from rmcl.items import Document, Folder
 from rmcl.utils import now
