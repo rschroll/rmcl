@@ -12,10 +12,9 @@ import bidict
 import pyfuse3
 import trio
 
-from rmcl.api import get_client
 from rmcl.const import ROOT_ID, FileType
 from rmcl.exceptions import ApiError, VirtualItemError
-from rmcl.items import Document, Folder
+from rmcl.items import Document, Folder, Item
 from rmcl.utils import now
 
 class FSMode(enum.Enum):
@@ -77,7 +76,7 @@ class ModeFile():
     async def write(self, offset, buf):
         command = buf.decode('utf-8').strip().lower()
         if command == 'refresh':
-            (await get_client()).refresh_deadline = None
+            await Item.invalidate_cache()
             return len(buf)
 
         try:
@@ -115,7 +114,7 @@ class RmApiFS(pyfuse3.Operations):
     async def get_by_id(self, id_):
         if id_ == self.mode_file.id:
             return self.mode_file
-        return await (await get_client()).get_by_id(id_)
+        return await Item.get_by_id(id_)
 
     async def filename(self, item, pitem=None):
         if item == pitem:

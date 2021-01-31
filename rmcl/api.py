@@ -2,6 +2,8 @@
 # Copyright 2020-2021 Robert Schroll
 # This file is part of rmcl and is distributed under the MIT license.
 
+from __future__ import annotations
+
 import asks
 from logging import getLogger
 import enum
@@ -11,7 +13,7 @@ import trio
 from uuid import uuid4
 
 from .config import load, dump
-from .items import Item, Folder, VirtualFolder
+from . import items
 from .utils import now
 from .zipdir import ZipHeader
 from .exceptions import (
@@ -53,8 +55,8 @@ class Client:
         if "usertoken" in config:
             self.token_set["usertoken"] = config["usertoken"]
 
-        root = VirtualFolder('', ROOT_ID)
-        trash = VirtualFolder('.trash', TRASH_ID, root.id)
+        root = items.VirtualFolder('', ROOT_ID)
+        trash = items.VirtualFolder('.trash', TRASH_ID, root.id)
         self.by_id = {root.id: root, trash.id: trash}
         self.refresh_deadline = None
         self.update_lock = trio.Lock()
@@ -193,9 +195,9 @@ class Client:
             if old:
                 old_ids.remove(old.id)
             if not old or old.version != item['Version']:
-                new = Item.from_metadata(item)
+                new = items.Item.from_metadata(item)
                 self.by_id[new.id] = new
-            elif isinstance(old, Folder):
+            elif isinstance(old, items.Folder):
                 old.children = []
 
         for id_ in old_ids:
@@ -247,7 +249,7 @@ class Client:
             item = ZipHeader.from_stream(stream)
         return FileType.notes, None
 
-    async def delete(self, item: Item):
+    async def delete(self, item: items.Item):
         """Delete a document from the cloud.
 
         Args:
@@ -265,7 +267,7 @@ class Client:
 
         return self.check_response(response)
 
-    async def update_metadata(self, item: Item):
+    async def update_metadata(self, item: items.Item):
         """Send an update of the current metadata of a meta object
 
         Update the meta item.
