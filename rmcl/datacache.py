@@ -1,3 +1,6 @@
+# Copyright 2020-2021 Robert Schroll
+# This file is part of rmcl and is distributed under the MIT license.
+
 import sqlite3
 
 from xdg import xdg_cache_home

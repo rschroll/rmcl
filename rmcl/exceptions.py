@@ -1,3 +1,6 @@
+# Copyright 2019 Stijn Van Campenhout
+# This file is part of rmcl and is distributed under the MIT license.
+
 class AuthError(Exception):
     """Authentication error"""
     def __init__(self, msg):

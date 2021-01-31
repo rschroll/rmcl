@@ -1,3 +1,7 @@
+# Copyright 2019 Stijn Van Campenhout
+# Copyright 2020-2021 Robert Schroll
+# This file is part of rmcl and is distributed under the MIT license.
+
 import asks
 from logging import getLogger
 import enum

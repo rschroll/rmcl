@@ -1,3 +1,7 @@
+# Copyright 2019 Stijn Van Campenhout
+# Copyright 2021 Robert Schroll
+# This file is part of rmcl and is distributed under the MIT license.
+
 from pathlib import Path
 from yaml import BaseLoader
 from yaml import load as yml_load
