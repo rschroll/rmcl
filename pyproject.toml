@@ -7,7 +7,6 @@ license = "MIT"
 
 [tool.poetry.dependencies]
 python = "^3.7"
-pyaml = "^20.4.0"
 trio = "^0.18.0"
 asks = "^2.4.12"
 xdg = "^5.0.1"

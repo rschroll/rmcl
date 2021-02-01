@@ -12,7 +12,7 @@ import json
 import trio
 from uuid import uuid4
 
-from .config import load, dump
+from .config import Config
 from . import items
 from .utils import now
 from .zipdir import ZipHeader
@@ -43,17 +43,8 @@ class Client:
     and does all the heavy lifting for you.
     """
 
-    token_set = {
-        "devicetoken": "",
-        "usertoken": ""
-    }
-
     def __init__(self):
-        config = load()
-        if "devicetoken" in config:
-            self.token_set["devicetoken"] = config["devicetoken"]
-        if "usertoken" in config:
-            self.token_set["usertoken"] = config["usertoken"]
+        self.config = Config()
 
         root = items.VirtualFolder('', ROOT_ID)
         trash = items.VirtualFolder('.trash', TRASH_ID, root.id)
@@ -96,8 +87,8 @@ class Client:
             "user-agent": USER_AGENT,
         }
 
-        if self.token_set["usertoken"]:
-            token = self.token_set["usertoken"]
+        if self.config.get("usertoken"):
+            token = self.config["usertoken"]
             _headers["Authorization"] = f"Bearer {token}"
         for k in headers.keys():
             _headers[k] = headers[k]
@@ -135,8 +126,7 @@ class Client:
         }
         response = await self.request("POST", DEVICE_TOKEN_URL, body=body)
         if response.ok:
-            self.token_set["devicetoken"] = response.text
-            dump(self.token_set)
+            self.config["devicetoken"] = response.text
             return True
         else:
             raise AuthError("Can't register device")
@@ -155,15 +145,14 @@ class Client:
             AuthError: An error occurred while renewing the user token.
         """
 
-        if not self.token_set["devicetoken"]:
+        if not self.config.get("devicetoken"):
             raise AuthError("Please register a device first")
-        token = self.token_set["devicetoken"]
+        token = self.config["devicetoken"]
         response = await self.request("POST", USER_TOKEN_URL, None, headers={
                 "Authorization": f"Bearer {token}"
             })
         if response.status_code < 400:
-            self.token_set["usertoken"] = response.text
-            dump(self.token_set)
+            self.config["usertoken"] = response.text
             return True
         else:
             raise AuthError("Can't renew token: {e}".format(
@@ -176,7 +165,7 @@ class Client:
             bool: True if the client is authenticated
         """
 
-        return self.token_set["devicetoken"] and self.token_set["usertoken"]
+        return self.config.get("devicetoken") and self.config.get("usertoken")
 
     async def update_items(self):
         response = await self.request('GET', '/document-storage/json/2/docs')
