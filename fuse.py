@@ -12,9 +12,9 @@ import bidict
 import pyfuse3
 import trio
 
+from rmcl import Document, Folder, Item, invalidate_cache
 from rmcl.const import ROOT_ID, FileType
 from rmcl.exceptions import ApiError, VirtualItemError
-from rmcl.items import Document, Folder, Item
 from rmcl.utils import now
 
 class FSMode(enum.Enum):
@@ -80,7 +80,7 @@ class ModeFile():
     async def write(self, offset, buf):
         command = buf.decode('utf-8').strip().lower()
         if command == 'refresh':
-            await Item.invalidate_cache()
+            await invalidate_cache()
             return len(buf)
 
         try:

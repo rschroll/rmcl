@@ -40,10 +40,6 @@ class Item:
     async def get_by_id(id_):
         return await (await api.get_client()).get_by_id(id_)
 
-    @staticmethod
-    async def invalidate_cache():
-        (await api.get_client()).refresh_deadline = None
-
     @classmethod
     def from_metadata(cls, metadata):
         type_ = metadata.get('Type')

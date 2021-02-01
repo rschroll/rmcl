@@ -339,3 +339,9 @@ async def get_client():
         _client = Client()
         await _client.renew_token()
     return _client
+
+async def invalidate_cache():
+    (await get_client()).refresh_deadline = None
+
+async def register_device(code: str):
+    return await (await get_client()).register_device(code)
