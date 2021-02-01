@@ -56,17 +56,20 @@ class ModeFile():
     def mtime(self):
         return now()
 
-    async def raw(self):
+    def _raw_bytes(self):
         return f'{self._fs.mode}\n'.encode('utf-8')
 
+    async def raw(self):
+        return io.BytesIO(self._raw_bytes())
+
     async def raw_size(self):
-        return len(await self.raw())
+        return len(self._raw_bytes())
 
     async def contents(self):
         return await self.raw()
 
     async def size(self):
-        return len(await self.contents())
+        return await self.raw_size()
 
     async def update_metadata(self):
         raise VirtualItemError('Cannot update .mode file')
@@ -228,7 +231,7 @@ class RmApiFS(pyfuse3.Operations):
     async def read(self, fh, start, size):
         item = await self.get_by_id(self.get_id(fh))
         if self.mode == FSMode.meta:
-            contents = f'{item._metadata!r}\n'.encode('utf-8')
+            contents = io.BytesIO(f'{item._metadata!r}\n'.encode('utf-8'))
         elif self.mode == FSMode.raw:
             contents = await item.raw()
         elif self.mode == FSMode.annot or (self.mode == FSMode.orig and
@@ -236,7 +239,14 @@ class RmApiFS(pyfuse3.Operations):
             contents = await item.annotated()
         elif self.mode == FSMode.orig:
             contents = await item.contents()
-        return contents[start:start+size]
+        contents.seek(start)
+        retval = contents.read(size)
+        # Due to inaccurate size estimates, some applications continually
+        # try to read past the end of the file, despite consistently getting
+        # no data.  Throwing an error alerts them to the problem.
+        if not retval:
+            raise pyfuse3.FUSEError(errno.ENODATA)
+        return retval
 
     async def write(self, fh, offset, buf):
         if self.get_id(fh) == self.mode_file.id:

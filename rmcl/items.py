@@ -139,8 +139,10 @@ class Item:
     async def raw(self):
         contents = documentcache.get_document(self.id, self.version, 'raw')
         if not contents and await self.download_url():
-            contents = await (await api.get_client()).get_blob(await self.download_url())
+            contents_blob = await (await api.get_client()).get_blob(await self.download_url())
+            contents = io.BytesIO(contents_blob)
             documentcache.set_document(self.id, self.version, 'raw', contents)
+        contents.seek(0)
         return contents
 
     @with_lock
@@ -210,15 +212,15 @@ class Document(Item):
 
         contents = documentcache.get_document(self.id, self.version, 'orig')
         if contents is None:
-            zf = zipfile.ZipFile(io.BytesIO(await self.raw()), 'r')
+            zf = zipfile.ZipFile(await self.raw(), 'r')
             for f in zf.filelist:
                 if f.filename.endswith(str(await self.type())):
-                    contents = zf.read(f)
+                    contents = zf.open(f)
                     break
             else:
-                contents = b'Unable to load file contents'
-            print(len(contents))
+                contents = io.BytesIO(b'Unable to load file contents')
             documentcache.set_document(self.id, self.version, 'orig', contents)
+        contents.seek(0)
         return contents
 
     async def upload(self, new_contents, type_):
@@ -251,14 +253,17 @@ class Document(Item):
 
         contents = documentcache.get_document(self.id, self.version, 'annot')
         if contents is None:
-            zf = zipfile.ZipFile(io.BytesIO(await self.raw()), 'r')
+            zf = zipfile.ZipFile(await self.raw(), 'r')
             # run_sync doesn't accept keyword arguments to be passed to the sync
             # function, so we'll assemble to function to call out here.
             render_func = lambda: render(sources.ZipSource(zf), **render_kw)
-            contents = (await trio.to_thread.run_sync(render_func)).read()
+            contents = (await trio.to_thread.run_sync(render_func))
             documentcache.set_document(self.id, self.version, 'annot', contents)
-            self._annotated_size = len(contents)
+            # Seek to end to get the length of this file.
+            contents.seek(0, 2)
+            self._annotated_size = contents.tell()
             datacache.set_property(self.id, self.version, 'annotated_size', self._annotated_size)
+        contents.seek(0)
         return contents
 
     async def annotated_size(self):
