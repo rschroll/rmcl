@@ -9,6 +9,8 @@ from logging import getLogger
 import enum
 import io
 import json
+import sys
+import textwrap
 import trio
 from uuid import uuid4
 
@@ -24,6 +26,7 @@ from .const import (RFC3339Nano,
                     USER_AGENT,
                     DEVICE_TOKEN_URL,
                     USER_TOKEN_URL,
+                    DEVICE_REGISTER_URL,
                     DEVICE,
                     NBYTES,
                     FILE_LIST_VALIDITY,
@@ -135,11 +138,32 @@ class Client:
 
         }
         response = await self.request("POST", DEVICE_TOKEN_URL, body=body)
-        if response.ok:
+        if response.status_code == 200:
             self.config["devicetoken"] = response.text
             return True
         else:
-            raise AuthError("Can't register device")
+            raise AuthError(f"Could not register device (status code {response.status_code})")
+
+    async def prompt_register_device(self):
+        if self.config.get("devicetoken"):
+            return
+
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            raise AuthError("Device is not registered and not on a TTY to prompt user")
+
+        print(textwrap.dedent(f"""
+            This reMarkable client needs to be registered with the reMarkable
+            cloud. To do this, please visit
+                {DEVICE_REGISTER_URL}
+            to get a one-time code.
+
+            (You may be prompted to log into your reMarkable cloud account. If
+            this happens, you may not be redirected to the one-time code page.
+            In this case, you may open the above link a second time to get the
+            code.)
+        """).strip())
+        code = input("\nEnter the one-time code: ")
+        return await self.register_device(code)
 
     async def renew_token(self):
         """Fetches a new user_token.
@@ -167,15 +191,6 @@ class Client:
         else:
             raise AuthError("Can't renew token: {e}".format(
                 e=response.status_code))
-
-    def is_auth(self) -> bool:
-        """Is the client authenticated
-
-        Returns:
-            bool: True if the client is authenticated
-        """
-
-        return self.config.get("devicetoken") and self.config.get("usertoken")
 
     async def update_items(self):
         response = await self.request('GET', '/document-storage/json/2/docs')
@@ -342,12 +357,15 @@ class Client:
 
 
 _client = None
-async def get_client():
+_client_lock = trio.Lock()
+async def get_client(allow_prompt=True):
     global _client
-    if _client is None:
-        print("Gettting client!")
-        _client = Client()
-        await _client.renew_token()
+    async with _client_lock:
+        if _client is None:
+            _client = Client()
+            if allow_prompt:
+                await _client.prompt_register_device()
+            await _client.renew_token()
     return _client
 
 async def invalidate_cache():
