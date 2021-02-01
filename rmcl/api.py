@@ -22,13 +22,13 @@ from .exceptions import (
     ApiError,)
 from .const import (RFC3339Nano,
                     USER_AGENT,
-                    BASE_URL,
                     DEVICE_TOKEN_URL,
                     USER_TOKEN_URL,
                     DEVICE,
                     NBYTES,
                     FILE_LIST_VALIDITY,
                     ROOT_ID,
+                    SERVICE_MGR_URL,
                     TRASH_ID,
                     FileType)
 
@@ -51,6 +51,7 @@ class Client:
         self.by_id = {root.id: root, trash.id: trash}
         self.refresh_deadline = None
         self.update_lock = trio.Lock()
+        self._base_url = None
 
     async def request(self, method: str, path: str,
                       data=None,
@@ -79,7 +80,7 @@ class Client:
         if not path.startswith("http"):
             if not path.startswith('/'):
                 path = '/' + path
-            url = f"{BASE_URL}{path}"
+            url = f"https://{await self.base_url()}{path}"
         else:
             url = path
 
@@ -99,6 +100,15 @@ class Client:
                                   headers=_headers,
                                   params=params,
                                   stream=stream)
+
+    async def base_url(self):
+        if self._base_url is None:
+            resp = await self.request("GET", SERVICE_MGR_URL)
+            try:
+                self._base_url = resp.json().get("Host")
+            except json.decoder.JSONDecodeError:
+                raise ApiError("Failed to get service URL", resp)
+        return self._base_url
 
     async def register_device(self, code: str):
         """Registers a device on the Remarkable Cloud.
