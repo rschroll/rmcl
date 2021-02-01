@@ -245,14 +245,17 @@ class Document(Item):
 
         return await self.upload_raw(f)
 
-    async def annotated(self):
+    async def annotated(self, **render_kw):
         if render is None:
             raise ImportError("rmrl must be installed to get annotated documents")
 
         contents = documentcache.get_document(self.id, self.version, 'annot')
         if contents is None:
             zf = zipfile.ZipFile(io.BytesIO(await self.raw()), 'r')
-            contents = render(sources.ZipSource(zf)).read()
+            # run_sync doesn't accept keyword arguments to be passed to the sync
+            # function, so we'll assemble to function to call out here.
+            render_func = lambda: render(sources.ZipSource(zf), **render_kw)
+            contents = (await trio.to_thread.run_sync(render_func)).read()
             documentcache.set_document(self.id, self.version, 'annot', contents)
             self._annotated_size = len(contents)
             datacache.set_property(self.id, self.version, 'annotated_size', self._annotated_size)
