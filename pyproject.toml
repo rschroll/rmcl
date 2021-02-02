@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "reMarkable Cloud Library"
 authors = ["Robert Schroll <rschroll@gmail.com>"]
 license = "MIT"
+repository = "https://github.com/rschroll/rmcl"
+readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.7"
@@ -14,8 +16,6 @@ xdg = "^5.0.1"
 [tool.poetry.dev-dependencies]
 ipython = "^7.19.0"
 jedi = "0.17.2"
-bidict = "^0.21.2"
-pyfuse3 = "^3.2.0"
 rmrl = "^0.1.2"
 
 [build-system]
