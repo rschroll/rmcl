@@ -20,6 +20,8 @@ from . import documentcache
 from .exceptions import DocumentNotFound, VirtualItemError
 from .utils import now, parse_datetime
 
+log = logging.getLogger(__name__)
+
 def with_lock(func):
     async def decorated(self, *args, **kw):
         if self._lock.statistics().owner == trio.lowlevel.current_task():
@@ -47,7 +49,7 @@ class Item:
             return Document(metadata)
         if type_ == cls.FOLDER:
             return Folder(metadata)
-        logging.error(f"Unknown document type: {type_}")
+        log.error(f"Unknown document type: {type_}")
         return None
 
     @classmethod
@@ -57,7 +59,7 @@ class Item:
         elif issubclass(cls, Folder):
             type_ = cls.FOLDER
         else:
-            logging.error(f"Cannot create a new item of class {cls}")
+            log.error(f"Cannot create a new item of class {cls}")
             return None
 
         metadata = {
@@ -118,7 +120,7 @@ class Item:
         try:
             self._metadata = await (await api.get_client()).get_metadata(self.id, downloadable)
         except DocumentNotFound:
-            logging.error(f"Could not update metadata for {self}")
+            log.error(f"Could not update metadata for {self}")
 
     @with_lock
     async def download_url(self):
@@ -151,7 +153,7 @@ class Item:
     @with_lock
     async def _get_details(self):
         if not self._type and await self.download_url():
-            print('Getting details', self)
+            log.debug(f"Getting details for {self}")
             self._type, self._size = await (await api.get_client()).get_file_details(await self.download_url())
             if self._size is None:
                 self._size = await self.raw_size()
@@ -159,7 +161,7 @@ class Item:
             if self._type != FileType.unknown:
                 # Try again the next time we start up.
                 datacache.set_property(self.id, self.version, 'type', str(self._type))
-            print('  Got', self._type, self._size)
+            log.debug(f"Details for {self}: type {self._type}, size {self._size}")
 
     async def type(self):
         await self._get_details()
@@ -249,6 +251,10 @@ class Document(Item):
 
         contents = documentcache.get_document(self.id, self.version, 'annot')
         if contents is None:
+            if 'progress_cb' not in render_kw:
+                render_kw['progress_cb'] = (
+                    lambda pct: log.info(f"Rendering {self}: {pct:0.1f}%"))
+
             zf = zipfile.ZipFile(await self.raw(), 'r')
             # run_sync doesn't accept keyword arguments to be passed to the sync
             # function, so we'll assemble to function to call out here.

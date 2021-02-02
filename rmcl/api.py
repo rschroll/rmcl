@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import asks
-from logging import getLogger
+import logging
 import enum
 import io
 import json
@@ -36,7 +36,7 @@ from .const import (RFC3339Nano,
                     FileType)
 
 asks.init('trio')
-log = getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 class Client:
@@ -96,7 +96,6 @@ class Client:
             _headers["Authorization"] = f"Bearer {token}"
         for k in headers.keys():
             _headers[k] = headers[k]
-        log.debug(url, _headers)
         return await asks.request(method, url,
                                   json=body,
                                   data=data,

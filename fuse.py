@@ -5,6 +5,7 @@ import argparse
 import enum
 import errno
 import io
+import logging
 import os
 import stat
 
@@ -16,6 +17,8 @@ from rmcl import Document, Folder, Item, invalidate_cache
 from rmcl.const import ROOT_ID, FileType
 from rmcl.exceptions import ApiError, VirtualItemError
 from rmcl.utils import now
+
+log = logging.getLogger(__name__)
 
 class FSMode(enum.Enum):
     meta = 'meta'
@@ -269,12 +272,12 @@ class RmApiFS(pyfuse3.Operations):
         elif b'mimetypeapplication/epub+zip' in data[:100]:
             type_ = FileType.epub
         else:
-            print('Error: Not a PDF or EPUB file')
+            log.error('Error: Not a PDF or EPUB file')
             raise pyfuse3.FUSEError(errno.EIO)  # Unfortunately, this will be ignored
         try:
             await document.upload(io.BytesIO(data), type_)
         except ApiError as error:
-            print('API Error:', error)
+            log.error('API Error:', error)
             raise pyfuse3.FUSEError(errno.EREMOTEIO)  # Unfortunately, this will be ignored
         finally:
             del self.buffers[fh]
@@ -356,8 +359,8 @@ class RmApiFS(pyfuse3.Operations):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('mountpoint', type=str, help="Mount point of filesystem")
-    parser.add_argument('-d', '--debug', action='store_true', default=False,
-                        help="Enable debugging output")
+    parser.add_argument('-v', '--verbose', action='count', default=0,
+                        help="Enable verbose output (-vv for even more verbosity)")
     parser.add_argument('-m', '--mode', type=FSMode, choices=list(FSMode),
                         default=FSMode.annot, help="Type of files to mount")
     return parser.parse_args()
@@ -366,7 +369,11 @@ def main(options):
     fs = RmApiFS(options.mode)
     fuse_options = set(pyfuse3.default_options)
     fuse_options.add('fsname=rmapi')
-    if options.debug:
+    if options.verbose == 1:
+        logging.basicConfig(level=logging.DEBUG)
+    elif options.verbose > 1:
+        logging.basicConfig(level=logging.INFO)
+        # Fuse debug is really verbose, so stick that here.
         fuse_options.add('debug')
     pyfuse3.init(fs, options.mountpoint, fuse_options)
     try:
