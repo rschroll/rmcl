@@ -14,13 +14,17 @@ As a taste, this code will list all of the files and their types in the
 root directory of your reMarkable cloud.
 ```python
 from rmcl import Item, Document, Folder
+import trio
 
-root = await Item.get_by_id('')  # The root folder is identified by the empty string
-for child in root.children:
-    if isinstance(child, Folder):
-        print(f"{child.name}: folder")
-    elif isinstance(child, Document):  # The only other possibility
-        print(f"{child.name}: {await child.type()}")
+async def list_files():
+    root = await Item.get_by_id('')  # The root folder has ID of empty string
+    for child in root.children:
+        if isinstance(child, Folder):
+            print(f"{child.name}: folder")
+        elif isinstance(child, Document):  # The only other possibility
+            print(f"{child.name}: {await child.type()}")
+
+trio.run(list_files)
 ```
 
 ## Installation
