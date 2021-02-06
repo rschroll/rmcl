@@ -1,6 +1,7 @@
 # Copyright 2020-2021 Robert Schroll
 # This file is part of rmcl and is distributed under the MIT license.
 
+import functools
 import io
 import json
 import logging
@@ -18,11 +19,13 @@ from .const import ROOT_ID, TRASH_ID, FileType
 from . import datacache
 from . import documentcache
 from .exceptions import DocumentNotFound, VirtualItemError
+from .sync import add_sync
 from .utils import now, parse_datetime
 
 log = logging.getLogger(__name__)
 
 def with_lock(func):
+    @functools.wraps(func)
     async def decorated(self, *args, **kw):
         if self._lock.statistics().owner == trio.lowlevel.current_task():
             return await func(self, *args, **kw)
@@ -41,6 +44,12 @@ class Item:
     @staticmethod
     async def get_by_id(id_):
         return await (await api.get_client()).get_by_id(id_)
+
+    # Decorating a staticmethod is not trivial.  Since this is the only one,
+    # we define the _s manually, instead of using add_sync.
+    @staticmethod
+    def get_by_id_s(id_):
+        return trio.run(Item.get_by_id, id_)
 
     @classmethod
     def from_metadata(cls, metadata):
@@ -116,23 +125,25 @@ class Item:
     def __repr__(self):
         return f'<{self.__class__.__name__} "{self.name}">'
 
-    async def refresh_metadata(self, downloadable=True):
+    async def _refresh_metadata(self, downloadable=True):
         try:
             self._metadata = await (await api.get_client()).get_metadata(self.id, downloadable)
         except DocumentNotFound:
             log.error(f"Could not update metadata for {self}")
 
+    @add_sync
     @with_lock
     async def download_url(self):
         if not (self._metadata['BlobURLGet'] and
                 parse_datetime(self._metadata['BlobURLGetExpires']) > now()):
-            await self.refresh_metadata(downloadable=True)
+            await self._refresh_metadata(downloadable=True)
         # This could have failed...
         url = self._metadata['BlobURLGet']
         if url and parse_datetime(self._metadata['BlobURLGetExpires']) > now():
             return url
         return None
 
+    @add_sync
     @with_lock
     async def raw(self):
         contents = documentcache.get_document(self.id, self.version, 'raw')
@@ -143,6 +154,7 @@ class Item:
         contents.seek(0)
         return contents
 
+    @add_sync
     @with_lock
     async def raw_size(self):
         if not self._raw_size and await self.download_url():
@@ -163,20 +175,24 @@ class Item:
                 datacache.set_property(self.id, self.version, 'type', str(self._type))
             log.debug(f"Details for {self}: type {self._type}, size {self._size}")
 
+    @add_sync
     async def type(self):
         await self._get_details()
         return self._type
 
+    @add_sync
     async def size(self):
         await self._get_details()
         return self._size
 
+    @add_sync
     @with_lock
     async def update_metadata(self):
         if self.virtual:
             raise VirtualItemError('Cannot update virtual items')
         await (await api.get_client()).update_metadata(self)
 
+    @add_sync
     @with_lock
     async def delete(self):
         if self.virtual:
@@ -191,6 +207,7 @@ class Item:
         self.parent = TRASH_ID
         await client.update_metadata(self)
 
+    @add_sync
     @with_lock
     async def upload_raw(self, new_contents):
         if self.virtual:
@@ -204,6 +221,7 @@ class Document(Item):
         super().__init__(*args, **kw)
         self._annotated_size = datacache.get_property(self.id, self.version, 'annotated_size')
 
+    @add_sync
     async def contents(self):
         if await self.type() in (FileType.notes, FileType.unknown):
             return await self.raw()
@@ -221,6 +239,7 @@ class Document(Item):
         contents.seek(0)
         return contents
 
+    @add_sync
     async def upload(self, new_contents, type_):
         if type_ not in (FileType.pdf, FileType.epub):
             raise TypeError(f"Cannot upload file of type {type_}")
@@ -245,6 +264,7 @@ class Document(Item):
 
         return await self.upload_raw(f)
 
+    @add_sync
     async def annotated(self, **render_kw):
         if render is None:
             raise ImportError("rmrl must be installed to get annotated documents")
@@ -268,6 +288,7 @@ class Document(Item):
         contents.seek(0)
         return contents
 
+    @add_sync
     async def annotated_size(self):
         if self._annotated_size is not None:
             return self._annotated_size
@@ -280,6 +301,7 @@ class Folder(Item):
         super().__init__(metadata)
         self.children = []
 
+    @add_sync
     async def upload(self):
         f = io.BytesIO()
         with zipfile.ZipFile(f, 'w', zipfile.ZIP_DEFLATED) as zf:

@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from .config import Config
 from . import items
+from .sync import add_sync
 from .utils import now
 from .zipdir import ZipHeader
 from .exceptions import (
@@ -357,6 +358,7 @@ class Client:
 
 _client = None
 _client_lock = trio.Lock()
+@add_sync
 async def get_client(allow_prompt=True):
     global _client
     async with _client_lock:
@@ -367,8 +369,10 @@ async def get_client(allow_prompt=True):
             await _client.renew_token()
     return _client
 
+@add_sync
 async def invalidate_cache():
     (await get_client()).refresh_deadline = None
 
+@add_sync
 async def register_device(code: str):
     return await (await get_client()).register_device(code)

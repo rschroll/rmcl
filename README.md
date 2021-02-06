@@ -49,18 +49,37 @@ rmcl is asynchronous, and must be used with the
 
 ### Asynchronous
 
-rmcl is an asynchronous.  This keeps it from blocking during the many
-HTTP transactions it uses.  Most methods are `async`, and therefore
+rmcl is asynchronous at its core.  This keeps it from blocking during the
+many HTTP transactions it uses.  Most methods are `async`, and therefore
 must be called with the `await` keyword.  rmcl is designed to work with
 the [trio](https://trio.readthedocs.io/en/stable/) async library.
+
+### Synchronous Option
+
+Asynchronous code can be overkill for simple scripts, so rmcl offers
+synchronous versions of all of its async functions.  These functions
+have a suffix of `'_s'` in their names.  This means that the above
+example could be written
+```python
+def list_files_sync():
+    root = Item.get_by_id_s('')
+    for child in root.children:
+        if isinstance(child, Folder):
+            print(f"{child.name}: folder")
+        elif isinstance(child, Document):
+            print(f"{child.name}: {child.type_s()}")
+```
+Note that these synchronous functions are still calling the asynchronous
+low-level code.  They may fail if called within another asynchronous
+framework.
 
 ### Object Oriented
 
 The main interface to rmcl is the `Item` class and its two subclasses,
 `Folder` and `Document`.  The reMarkable cloud gives each item an ID.
 If the ID of an Item is known, it can be retrieved with the
-`Item.get_by_id()` class method.  New `Folder`s and `Document`s can be
-made with the `.new()` classmethod, which expects as arguments the item's
+`Item.get_by_id()` static method.  New `Folder`s and `Document`s can be
+made with the `.new()` class method, which expects as arguments the item's
 name and parent ID.
 
 While the cloud API presents a flat directory structure, rmcl assembles
@@ -144,8 +163,7 @@ To help users decide which library best fits their needs, here are the
 major differences:
 - rmcl is asynchronous, while rMapy is synchonous.  This means that
   rmcl will not block while making HTTP requests to the reMarkable API.
-  However, asynchronous code is less straightforward than synchronous
-  code, and there may be no benefit to asynchronicity is simple scripts.
+  rmcl's synchronous functions will block, much like rMapy.
 - rmcl has a simpler object structure, mostly focused around `Item` and
   its subclasses `Document` and `Folder`.  rMapy has similar objects
   (`Meta`, `Document`, and `Folder`), but it also has a `Client` and
