@@ -60,7 +60,8 @@ class Client:
     async def request(self, method: str, path: str,
                       data=None,
                       body=None, headers=None,
-                      params=None, stream=False) -> asks.response_objects.Response:
+                      params=None, stream=False,
+                      allow_renew=True) -> asks.response_objects.Response:
         """Creates a request against the Remarkable Cloud API
 
         This function automatically fills in the blanks of base
@@ -97,12 +98,18 @@ class Client:
             _headers["Authorization"] = f"Bearer {token}"
         for k in headers.keys():
             _headers[k] = headers[k]
-        return await asks.request(method, url,
+        resp = await asks.request(method, url,
                                   json=body,
                                   data=data,
                                   headers=_headers,
                                   params=params,
                                   stream=stream)
+        if not (allow_renew and resp.status_code == 401):
+            return resp
+
+        log.debug("Got 401 code; trying to renew token")
+        await self.renew_token()
+        return await self.request(method, path, data, body, headers, params, stream, False)
 
     async def base_url(self):
         if self._base_url is None:
@@ -181,10 +188,9 @@ class Client:
 
         if not self.config.get("devicetoken"):
             raise AuthError("Please register a device first")
-        token = self.config["devicetoken"]
-        response = await self.request("POST", USER_TOKEN_URL, None, headers={
-                "Authorization": f"Bearer {token}"
-            })
+        headers = {"Authorization": f'Bearer {self.config["devicetoken"]}'}
+        response = await self.request("POST", USER_TOKEN_URL,
+                                      headers=headers, allow_renew=False)
         if response.status_code < 400:
             self.config["usertoken"] = response.text
             return True
