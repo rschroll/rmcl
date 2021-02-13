@@ -142,7 +142,8 @@ more sophisticated caching system soon.
 The reMarkable cloud requires two tokens: The *device token* identifies
 your device and needs only to be set once.  The *user token* is used on
 most requests, and should be updated occasionally.  rmcl automatically
-renews the user token each time it is run.
+renews the user token once a day, or when it receives an authentication
+error from the API.
 
 Getting the device token requires user interaction the first time a
 program is run.  If rmcl detects that it is being run interactively, it

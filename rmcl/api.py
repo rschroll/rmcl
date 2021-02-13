@@ -27,6 +27,7 @@ from .const import (RFC3339Nano,
                     USER_AGENT,
                     DEVICE_TOKEN_URL,
                     USER_TOKEN_URL,
+                    USER_TOKEN_VALIDITY,
                     DEVICE_REGISTER_URL,
                     DEVICE,
                     NBYTES,
@@ -93,6 +94,11 @@ class Client:
             "user-agent": USER_AGENT,
         }
 
+        if allow_renew and (not self.config.get("usertoken") or
+            now().timestamp() - self.config.get("usertoken-timestamp", 0) > USER_TOKEN_VALIDITY):
+            await self.renew_token()
+
+        # Get the usertoken again, in case it was updated above
         if self.config.get("usertoken"):
             token = self.config["usertoken"]
             _headers["Authorization"] = f"Bearer {token}"
@@ -144,7 +150,7 @@ class Client:
             "deviceID": uuid,
 
         }
-        response = await self.request("POST", DEVICE_TOKEN_URL, body=body)
+        response = await self.request("POST", DEVICE_TOKEN_URL, body=body, allow_renew=False)
         if response.status_code == 200:
             self.config["devicetoken"] = response.text
             return True
@@ -186,13 +192,17 @@ class Client:
             AuthError: An error occurred while renewing the user token.
         """
 
+        log.debug("Renewing user token")
         if not self.config.get("devicetoken"):
             raise AuthError("Please register a device first")
         headers = {"Authorization": f'Bearer {self.config["devicetoken"]}'}
         response = await self.request("POST", USER_TOKEN_URL,
                                       headers=headers, allow_renew=False)
         if response.status_code < 400:
-            self.config["usertoken"] = response.text
+            self.config.update({
+                "usertoken": response.text,
+                "usertoken-timestamp": now().timestamp()
+            })
             return True
         else:
             raise AuthError("Can't renew token: {e}".format(
@@ -372,7 +382,6 @@ async def get_client(allow_prompt=True):
             _client = Client()
             if allow_prompt:
                 await _client.prompt_register_device()
-            await _client.renew_token()
     return _client
 
 @add_sync
