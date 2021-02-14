@@ -13,7 +13,7 @@ def _get_conn():
     if _conn is not None:
         return _conn
 
-    CACHE_DIR.mkdir(exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
     _conn = sqlite3.connect(CACHE_DIR / 'filedata.db')
     c = _conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS filedata
