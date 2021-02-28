@@ -133,10 +133,6 @@ database, so this information is not lost when the process stops.  The
 database stores this information by version, so it knows when it must be
 recalculated.
 
-rmcl does some simple caching of document contents after it is downloaded.
-It currently only keeps the most recent contents, but we hope to build a
-more sophisticated caching system soon.
-
 ### Handles Authentication
 
 The reMarkable cloud requires two tokens: The *device token* identifies

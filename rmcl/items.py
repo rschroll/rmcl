@@ -17,7 +17,6 @@ except ImportError:
 from . import api
 from .const import ROOT_ID, TRASH_ID, FileType
 from . import datacache
-from . import documentcache
 from .exceptions import DocumentNotFound, VirtualItemError
 from .sync import add_sync
 from .utils import now, parse_datetime
@@ -146,13 +145,10 @@ class Item:
     @add_sync
     @with_lock
     async def raw(self):
-        contents = documentcache.get_document(self.id, self.version, 'raw')
-        if not contents and await self.download_url():
+        if await self.download_url():
             contents_blob = await (await api.get_client()).get_blob(await self.download_url())
-            contents = io.BytesIO(contents_blob)
-            documentcache.set_document(self.id, self.version, 'raw', contents)
-        contents.seek(0)
-        return contents
+            return io.BytesIO(contents_blob)
+        return None
 
     @add_sync
     @with_lock
@@ -226,18 +222,11 @@ class Document(Item):
         if await self.type() in (FileType.notes, FileType.unknown):
             return await self.raw()
 
-        contents = documentcache.get_document(self.id, self.version, 'orig')
-        if contents is None:
-            zf = zipfile.ZipFile(await self.raw(), 'r')
-            for f in zf.filelist:
-                if f.filename.endswith(str(await self.type())):
-                    contents = zf.open(f)
-                    break
-            else:
-                contents = io.BytesIO(b'Unable to load file contents')
-            documentcache.set_document(self.id, self.version, 'orig', contents)
-        contents.seek(0)
-        return contents
+        zf = zipfile.ZipFile(await self.raw(), 'r')
+        for f in zf.filelist:
+            if f.filename.endswith(str(await self.type())):
+                return zf.open(f)
+        return io.BytesIO(b'Unable to load file contents')
 
     @add_sync
     async def upload(self, new_contents, type_):
@@ -269,22 +258,19 @@ class Document(Item):
         if render is None:
             raise ImportError("rmrl must be installed to get annotated documents")
 
-        contents = documentcache.get_document(self.id, self.version, 'annot')
-        if contents is None:
-            if 'progress_cb' not in render_kw:
-                render_kw['progress_cb'] = (
-                    lambda pct: log.info(f"Rendering {self}: {pct:0.1f}%"))
+        if 'progress_cb' not in render_kw:
+            render_kw['progress_cb'] = (
+                lambda pct: log.info(f"Rendering {self}: {pct:0.1f}%"))
 
-            zf = zipfile.ZipFile(await self.raw(), 'r')
-            # run_sync doesn't accept keyword arguments to be passed to the sync
-            # function, so we'll assemble to function to call out here.
-            render_func = lambda: render(sources.ZipSource(zf), **render_kw)
-            contents = (await trio.to_thread.run_sync(render_func))
-            documentcache.set_document(self.id, self.version, 'annot', contents)
-            # Seek to end to get the length of this file.
-            contents.seek(0, 2)
-            self._annotated_size = contents.tell()
-            datacache.set_property(self.id, self.version, 'annotated_size', self._annotated_size)
+        zf = zipfile.ZipFile(await self.raw(), 'r')
+        # run_sync doesn't accept keyword arguments to be passed to the sync
+        # function, so we'll assemble to function to call out here.
+        render_func = lambda: render(sources.ZipSource(zf), **render_kw)
+        contents = (await trio.to_thread.run_sync(render_func))
+        # Seek to end to get the length of this file.
+        contents.seek(0, 2)
+        self._annotated_size = contents.tell()
+        datacache.set_property(self.id, self.version, 'annotated_size', self._annotated_size)
         contents.seek(0)
         return contents
 
