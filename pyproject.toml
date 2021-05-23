@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rmcl"
-version = "0.4.0"
+version = "0.4.1"
 description = "reMarkable Cloud Library"
 authors = ["Robert Schroll <rschroll@gmail.com>"]
 license = "MIT"
