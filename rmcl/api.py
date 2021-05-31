@@ -217,9 +217,9 @@ class Client:
             log.error(f"Response code: {response.status_code}")
             raise ApiError("Failed to decode JSON data")
 
-        old_ids = set(self.by_id) - {'', 'trash'}
-        self.by_id[''].children = []
-        self.by_id['trash'].children = []
+        old_ids = set(self.by_id) - {ROOT_ID, TRASH_ID}
+        self.by_id[ROOT_ID].children = []
+        self.by_id[TRASH_ID].children = []
         for item in response_json:
             old = self.by_id.get(item['ID'])
             if old:
@@ -235,7 +235,12 @@ class Client:
 
         for i in self.by_id.values():
             if i.parent is not None:
-                self.by_id[i.parent].children.append(i)
+                parent = self.by_id.get(i.parent)
+                if isinstance(parent, items.Folder):
+                    parent.children.append(i)
+                else:
+                    # Remarkable treats items with missing parents as in root
+                    self.by_id[ROOT_ID].children.append(i)
 
         self.refresh_deadline = now() + FILE_LIST_VALIDITY
 
